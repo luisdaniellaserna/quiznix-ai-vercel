@@ -206,6 +206,7 @@ export class RoomManager {
       options: this.optionsOf(room, index),
       timerSeconds: room.timerSeconds,
       deadline: room.deadline,
+      correctAnswer: room.questions[index].correct_answer,
     })
   }
 

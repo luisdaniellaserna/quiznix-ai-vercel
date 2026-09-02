@@ -292,6 +292,13 @@ function done() {
           >
             {{ hasSubmitted ? 'Submitted ✓' : countdown.expired.value ? 'Time up' : 'Submit answer' }}
           </button>
+
+          <!-- 3-5s reveal: show correct answer after time is up -->
+          <div v-if="countdown.expired.value && store.correctAnswer" class="alert alert-success justify-center gap-2">
+            <span>Correct answer: <strong>{{ store.correctAnswer }}</strong></span>
+            <span class="text-xs opacity-70">Next in a few seconds…</span>
+          </div>
+
           <p class="text-center text-sm opacity-70">
             {{
               countdown.expired.value

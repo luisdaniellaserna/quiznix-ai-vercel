@@ -24,6 +24,7 @@ export type GroupServerMessage =
       options: string[]
       timerSeconds: number
       deadline: number
+      correctAnswer: string
     }
   | { type: 'answer-updated'; playerId: string; name: string; option: string; correct: boolean }
   | { type: 'game-finished'; leaderboard: LeaderboardEntry[] }

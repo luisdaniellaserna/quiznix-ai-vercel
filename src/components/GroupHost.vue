@@ -18,16 +18,30 @@ const allAnswered = computed(
 )
 const canAdvance = computed(() => countdown.expired.value || allAnswered.value || answeredCount.value > 0)
 
-// no dead air: when everyone submitted, auto-advance after a short pause
+// no dead air: when everyone submitted, show correct answer 4s then auto-advance
 watch(allAnswered, (done) => {
   if (done && store.phase === 'question' && !countdown.expired.value) {
     window.setTimeout(() => {
       if (store.phase === 'question' && allAnswered.value && !countdown.expired.value) {
         store.nextQuestion()
       }
-    }, 1200)
+    }, 4000)
   }
 })
+
+// when timer runs out, also reveal correct answer 4s then auto-advance
+watch(
+  () => countdown.expired.value,
+  (expired) => {
+    if (expired && store.phase === 'question') {
+      window.setTimeout(() => {
+        if (store.phase === 'question' && countdown.expired.value) {
+          store.nextQuestion()
+        }
+      }, 4000)
+    }
+  },
+)
 
 const correctAnswer = computed(() => store.hostQuestions[store.currentIndex]?.correct_answer ?? '')
 
@@ -189,7 +203,7 @@ function finish() {
               </span>
             </li>
           </ul>
-          <button class="btn btn-primary mt-4" @click="finish">End game</button>
+          <button class="btn btn-error mt-4" @click="finish">End exam</button>
         </div>
       </div>
 
@@ -267,6 +281,19 @@ function finish() {
               <span class="shrink-0 font-black">{{ optionCount(option) }}</span>
             </div>
           </div>
+
+          <!-- 3-5s reveal: show correct answer to host (and players see via their own reveal) -->
+          <div v-if="countdown.expired.value && store.hostQuestions[store.currentIndex]" class="alert alert-success">
+            <span>Correct answer: <strong>{{ store.hostQuestions[store.currentIndex]?.correct_answer }}</strong></span>
+            <span class="text-xs opacity-70">Next in a few seconds…</span>
+          </div>
+          <div
+            v-else-if="allAnswered && !countdown.expired.value"
+            class="alert alert-info"
+          >
+            <span>All answers in! Revealing correct answer: <strong>{{ store.hostQuestions[store.currentIndex]?.correct_answer }}</strong></span>
+          </div>
+
           <div class="flex items-center justify-between gap-2">
             <button class="btn btn-ghost btn-sm" @click="requestExit">Exit quiz</button>
             <span v-if="!canAdvance" class="text-sm opacity-60">Waiting for answers…</span>

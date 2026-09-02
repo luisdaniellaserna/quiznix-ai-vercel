@@ -47,6 +47,7 @@ export const useGroupStore = defineStore('group', () => {
   const options = ref<string[]>([])
   const timerSeconds = ref(0)
   const deadline = ref<number | null>(null)
+  const correctAnswer = ref('')
   const myAnswer = ref<string | null>(null)
   const hostQuestions = ref<QuestionFormat[]>([])
   const liveAnswers = ref<Record<string, { name: string; option: string; correct: boolean }>>({})
@@ -139,6 +140,7 @@ export const useGroupStore = defineStore('group', () => {
         options.value = message.options
         timerSeconds.value = message.timerSeconds
         deadline.value = message.deadline
+        correctAnswer.value = message.correctAnswer
         myAnswer.value = null
         error.value = ''
         liveAnswers.value = {}
@@ -190,6 +192,7 @@ export const useGroupStore = defineStore('group', () => {
     options.value = []
     timerSeconds.value = 0
     deadline.value = null
+    correctAnswer.value = ''
     myAnswer.value = null
     hostQuestions.value = []
     liveAnswers.value = {}
@@ -307,6 +310,7 @@ export const useGroupStore = defineStore('group', () => {
     options,
     timerSeconds,
     deadline,
+    correctAnswer,
     myAnswer,
     hostQuestions,
     liveAnswers,

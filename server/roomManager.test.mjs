@@ -160,6 +160,7 @@ test('startGame broadcasts question-started with canonical options and a server 
     options: ['A', 'B', 'D', 'C'],
     timerSeconds: TIMER,
     deadline: NOW + TIMER * 1000,
+    correctAnswer: 'C',
   })
 })
 
