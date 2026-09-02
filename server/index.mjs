@@ -152,7 +152,14 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocketServer({ server })
 
+function heartbeat() {
+  this.isAlive = true
+}
+
 wss.on('connection', (ws) => {
+  ws.isAlive = true
+  ws.on('pong', heartbeat)
+
   const clientId = `c-${randomUUID()}`
   clientSockets.set(clientId, ws)
   socketClients.set(ws, clientId)
@@ -178,6 +185,16 @@ wss.on('connection', (ws) => {
     }
   })
 })
+
+const heartbeatInterval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) return ws.terminate()
+    ws.isAlive = false
+    ws.ping()
+  })
+}, 30000)
+
+wss.on('close', () => clearInterval(heartbeatInterval))
 
 setInterval(() => {
   for (const code of manager.sweep()) {

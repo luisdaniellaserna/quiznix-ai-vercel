@@ -29,6 +29,9 @@ export function roomServerOrigin() {
 export const useGroupStore = defineStore('group', () => {
   let socket: WebSocket | null = null
   let pending: GroupClientMessage[] = []
+  let reconnectAttempts = 0
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let shouldReconnect = true
 
   const role = ref<GroupRole>('none')
   const phase = ref<GroupPhase>('idle')
@@ -64,23 +67,53 @@ export const useGroupStore = defineStore('group', () => {
     }
   }
 
+  function scheduleReconnect() {
+    if (!shouldReconnect) return
+    if (phase.value === 'finished' || phase.value === 'closed') return
+    const base = 1000 * Math.pow(2, reconnectAttempts)
+    const delay = Math.min(base, 30000) + Math.random() * 500
+    console.log(`[group] disconnected — reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts + 1})`)
+    reconnectAttempts++
+    if (reconnectTimer) clearTimeout(reconnectTimer)
+    reconnectTimer = setTimeout(() => connect(), delay)
+  }
+
   function connect() {
-    if (socket && socket.readyState === WebSocket.OPEN) {
+    if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
       return
+    }
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
     }
     socket = new WebSocket(roomServerUrl())
     socket.onopen = () => {
+      console.log('[group] connected')
+      reconnectAttempts = 0
       const queued = pending.splice(0)
       for (const message of queued) {
         socket?.send(JSON.stringify(message))
       }
     }
     socket.onmessage = (event) => handle(JSON.parse(event.data) as GroupServerMessage)
+    socket.onerror = () => {
+      // triggers onclose — let the close handler decide to reconnect
+      socket?.close()
+    }
     socket.onclose = () => {
-      pending = []
-      if (phase.value !== 'finished' && phase.value !== 'closed') {
-        close(UNREACHABLE_MESSAGE)
+      // if we intentionally left (leave/closeRoom) or game finished, do not reconnect
+      if (!shouldReconnect || phase.value === 'finished' || phase.value === 'closed') {
+        pending = []
+        return
       }
+      // transient drop while in lobby/question/connecting — keep pending for retry
+      // and try to re-establish with exponential backoff instead of immediately showing unreachable
+      if (phase.value === 'connecting' || phase.value === 'lobby' || phase.value === 'question') {
+        scheduleReconnect()
+        return
+      }
+      pending = []
+      close(UNREACHABLE_MESSAGE)
     }
   }
 
@@ -163,9 +196,15 @@ export const useGroupStore = defineStore('group', () => {
     leaderboard.value = null
     closedMessage.value = ''
     error.value = ''
+    // do not clear shouldReconnect here — leave() / close() handle it; createRoom/joinRoom reset it
   }
 
   function close(message: string) {
+    shouldReconnect = false
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
     phase.value = 'closed'
     closedMessage.value = message
   }
@@ -177,6 +216,12 @@ export const useGroupStore = defineStore('group', () => {
     maxPlayers: number
   }) {
     reset()
+    shouldReconnect = true
+    reconnectAttempts = 0
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
     role.value = 'host'
     phase.value = 'connecting'
     topic.value = settings.topic
@@ -194,6 +239,12 @@ export const useGroupStore = defineStore('group', () => {
 
   function joinRoom(code: string, name: string) {
     reset()
+    shouldReconnect = true
+    reconnectAttempts = 0
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
     role.value = 'player'
     phase.value = 'connecting'
     playerName.value = name
@@ -226,12 +277,18 @@ export const useGroupStore = defineStore('group', () => {
   }
 
   function leave() {
+    shouldReconnect = false
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
     if (socket) {
       socket.onclose = null
       socket.close()
       socket = null
     }
     pending = []
+    reconnectAttempts = 0
     reset()
   }
 
