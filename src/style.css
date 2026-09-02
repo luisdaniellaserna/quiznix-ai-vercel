@@ -1,0 +1,58 @@
+@import 'tailwindcss';
+@plugin "daisyui" {
+  themes:
+    light,
+    dark,
+    cupcake --default,
+    bumblebee,
+    emerald,
+    corporate,
+    synthwave,
+    retro,
+    cyberpunk,
+    valentine,
+    halloween,
+    garden,
+    forest,
+    aqua,
+    lofi,
+    pastel,
+    fantasy,
+    wireframe,
+    black,
+    luxury,
+    dracula,
+    cmyk,
+    autumn,
+    business,
+    acid,
+    lemonade,
+    night,
+    coffee,
+    winter,
+    dim,
+    nord,
+    sunset,
+    caramellatte,
+    abyss,
+    silk;
+  logs: false;
+}
+
+/* keep a single border on focused fields (daisyUI adds a focus outline) */
+.input:focus,
+.input:focus-within,
+.select:focus,
+.select:focus-within,
+.textarea:focus,
+.textarea:focus-within {
+  outline: none;
+}
+
+/* hide the scrollbar while keeping the content scrollable (theme picker list) */
+.scrollbar-hidden {
+  scrollbar-width: none;
+}
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
+}
