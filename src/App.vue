@@ -243,6 +243,11 @@ function removeLastAnswer() {
   userAnswers.value.pop()
 }
 
+function joinGroup(payload: { code: string; name: string }) {
+  groupStore.joinRoom(payload.code, payload.name)
+  status.value = 'group'
+}
+
 function leaveGroup() {
   groupStore.leave()
   status.value = 'start'
@@ -257,11 +262,12 @@ function reset() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-base-100 text-base-content">
+  <div class="min-h-screen overflow-x-hidden bg-base-100 text-base-content">
     <StartScreen
       v-if="status === 'start' && apiKey"
       :return-from-quiz="returnFromQuiz"
       @start-quiz="startQuiz"
+      @join-group="joinGroup"
     />
 
     <GroupHost v-else-if="status === 'group' && groupStore.role === 'host'" @leave="leaveGroup" />

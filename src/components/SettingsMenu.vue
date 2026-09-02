@@ -113,14 +113,14 @@ onUnmounted(() => {
 
 <template>
   <details ref="dropdownRef" class="dropdown dropdown-end" @toggle="lockPageScroll">
-    <summary class="btn btn-ghost btn-sm btn-circle group" aria-label="Settings">
+    <summary class="btn btn-ghost btn-circle group min-h-11 min-w-11" aria-label="Settings">
       <Icon
         icon="lucide:settings"
         class="h-5 w-5 transition-transform duration-300 group-hover:rotate-90"
       />
     </summary>
 
-    <div class="dropdown-content card card-sm z-50 w-60 bg-base-200 p-1.5 shadow-xl">
+    <div class="dropdown-content card card-sm z-50 w-60 max-w-[calc(100vw-1rem)] bg-base-200 p-1.5 shadow-xl">
       <h2 class="px-3 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wide opacity-70">
         Settings
       </h2>
@@ -156,14 +156,14 @@ onUnmounted(() => {
       <div class="flex items-center justify-between">
         <h3 class="text-lg font-bold">Change Theme</h3>
         <button
-          class="btn btn-ghost btn-sm btn-circle"
+          class="btn btn-ghost btn-circle min-h-11 min-w-11"
           aria-label="Close"
           @click="themeDialogRef?.close()"
         >
           <Icon icon="lucide:x" class="h-5 w-5" />
         </button>
       </div>
-      <ul class="mt-4 grid max-h-80 grid-cols-2 gap-2 overflow-y-auto overscroll-contain pr-1">
+      <ul class="mt-4 grid max-h-80 grid-cols-1 gap-2 overflow-y-auto overscroll-contain pr-1 sm:grid-cols-2">
         <li v-for="theme in themes" :key="theme">
           <label
             class="flex cursor-pointer items-center gap-2 rounded-lg border border-base-300 p-2 transition hover:border-base-content/40 hover:bg-base-200/60"
@@ -206,7 +206,7 @@ onUnmounted(() => {
       <div class="flex items-center justify-between">
         <h3 class="text-lg font-bold">Help</h3>
         <button
-          class="btn btn-ghost btn-sm btn-circle"
+          class="btn btn-ghost btn-circle min-h-11 min-w-11"
           aria-label="Close"
           @click="helpDialogRef?.close()"
         >
@@ -250,7 +250,7 @@ onUnmounted(() => {
       <div class="flex items-center justify-between">
         <h3 class="text-lg font-bold">Report a problem</h3>
         <button
-          class="btn btn-ghost btn-sm btn-circle"
+          class="btn btn-ghost btn-circle min-h-11 min-w-11"
           aria-label="Close"
           @click="reportDialogRef?.close()"
         >

@@ -133,14 +133,14 @@ onUnmounted(clearTimer)
         ></progress>
       </template>
 
-      <h3 class="text-lg font-semibold mt-2">{{ questions[currentQuestion].question }}</h3>
+      <h3 class="break-words text-base font-semibold sm:text-lg mt-2">{{ questions[currentQuestion].question }}</h3>
 
       <div class="grid gap-2">
         <button
           v-for="option in shuffleOptions"
           :key="option"
           type="button"
-          class="btn btn-outline w-full justify-start"
+          class="btn btn-outline h-auto min-h-12 w-full justify-start whitespace-normal break-words py-3 text-left"
           :class="{ 'btn-primary': option === selectedOption }"
           @click="selectedOption = option"
         >
@@ -148,7 +148,7 @@ onUnmounted(clearTimer)
         </button>
       </div>
 
-      <div class="card-actions justify-between mt-4">
+      <div class="card-actions flex-col gap-2 sm:flex-row justify-between mt-4">
         <div class="flex gap-2">
           <button class="btn btn-ghost text-error" @click="askQuit">Quit</button>
           <button class="btn" @click="goBack" :disabled="!canGoBack">Back</button>

@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useGroupStore } from '../stores/groupStore'
 import { useCountdown } from '../composables/useCountdown'
 import SettingsMenu from './SettingsMenu.vue'
@@ -42,26 +42,81 @@ function join() {
 
 const shuffledOptions = computed(() => [...store.options].sort(() => Math.random() - 0.5))
 
+const selectedOption = ref<string | null>(null)
+const hasSubmitted = computed(() => store.myAnswer !== null)
+
 function formatTime(ms: number) {
   const seconds = Math.round(ms / 1000)
   const minutes = Math.floor(seconds / 60)
   return minutes > 0 ? `${minutes}:${String(seconds % 60).padStart(2, '0')}` : `${seconds}s`
 }
 
-function pick(option: string) {
-  if (!countdown.expired.value) {
-    store.submitAnswer(option)
-  }
+function selectOption(option: string) {
+  if (countdown.expired.value || hasSubmitted.value) return
+  selectedOption.value = option
 }
 
+function submitAnswer() {
+  if (!selectedOption.value || hasSubmitted.value || countdown.expired.value) return
+  store.submitAnswer(selectedOption.value)
+}
+
+// clear selection when a new question starts
+watch(
+  () => store.currentIndex,
+  () => {
+    selectedOption.value = null
+  },
+)
+watch(
+  () => store.question,
+  () => {
+    if (store.phase === 'question') selectedOption.value = null
+  },
+)
+watch(
+  () => store.myAnswer,
+  (val) => {
+    if (val === null) selectedOption.value = null
+  },
+)
+
+const closedDialogRef = ref<HTMLDialogElement | null>(null)
+
+watch(
+  () => store.phase,
+  (phase) => {
+    if (phase === 'closed') {
+      void nextTick(() => {
+        if (!closedDialogRef.value?.open) closedDialogRef.value?.showModal()
+      })
+    } else {
+      closedDialogRef.value?.close()
+    }
+  },
+  { immediate: true },
+)
+
+watch(
+  () => store.closedMessage,
+  () => {
+    if (store.phase === 'closed') {
+      void nextTick(() => {
+        if (!closedDialogRef.value?.open) closedDialogRef.value?.showModal()
+      })
+    }
+  },
+)
+
 function done() {
+  closedDialogRef.value?.close()
   store.leave()
   emit('leave')
 }
 </script>
 
 <template>
-  <div class="min-h-screen bg-base-100 text-base-content">
+  <div class="min-h-screen overflow-x-hidden bg-base-100 text-base-content">
     <header class="navbar bg-base-200 px-4 py-4 shadow-sm">
       <div class="navbar-start">
         <span class="text-xl font-bold">Quiznix AI</span>
@@ -75,7 +130,7 @@ function done() {
     </header>
 
     <main class="mx-auto w-full max-w-3xl p-4">
-      <!-- closed by the host or a lost connection -->
+      <!-- closed by the host or a lost connection — also shown as modal -->
       <div v-if="store.phase === 'closed'" class="card mt-4 shadow-xl">
         <div class="card-body items-center text-center">
           <h2 class="text-xl font-bold">{{ store.closedMessage }}</h2>
@@ -145,7 +200,7 @@ function done() {
               type="text"
               maxlength="6"
               placeholder="ABC123"
-              class="input input-bordered input-lg w-full rounded-xl text-center text-2xl font-black tracking-[0.3em] uppercase focus:outline-none"
+              class="input input-bordered input-lg w-full rounded-xl text-center text-xl font-black tracking-[0.2em] uppercase focus:outline-none sm:text-2xl sm:tracking-[0.3em]"
               @input="
                 (event) => (joinCode = (event.target as HTMLInputElement).value.toUpperCase())
               "
@@ -202,32 +257,59 @@ function done() {
             :value="store.currentIndex + 1"
             :max="store.total"
           />
-          <h2 class="text-2xl font-bold">{{ store.question }}</h2>
+          <h2 class="break-words text-xl font-bold sm:text-2xl">{{ store.question }}</h2>
           <div class="grid gap-3">
             <button
               v-for="option in shuffledOptions"
               :key="option"
-              class="btn btn-lg justify-start rounded-xl"
-              :class="store.myAnswer === option ? 'btn-primary' : 'btn-outline'"
-              :disabled="countdown.expired.value"
-              @click="pick(option)"
+              class="btn btn-lg h-auto min-h-12 justify-start whitespace-normal break-words py-3 text-left rounded-xl"
+              :class="{
+                'btn-primary': selectedOption === option || store.myAnswer === option,
+                'btn-outline': selectedOption !== option && store.myAnswer !== option,
+                'opacity-60': hasSubmitted && store.myAnswer !== option,
+              }"
+              :disabled="countdown.expired.value || hasSubmitted"
+              @click="selectOption(option)"
             >
               {{ option }}
             </button>
           </div>
+          <button
+            class="btn btn-primary btn-lg w-full"
+            :disabled="!selectedOption || hasSubmitted || countdown.expired.value"
+            @click="submitAnswer"
+          >
+            {{ hasSubmitted ? 'Submitted ✓' : countdown.expired.value ? 'Time up' : 'Submit answer' }}
+          </button>
           <p class="text-center text-sm opacity-70">
             {{
               countdown.expired.value
-                ? store.myAnswer
-                  ? 'Time is up!'
+                ? hasSubmitted
+                  ? 'Time is up! Answer locked.'
                   : 'Time is up — no answer.'
-                : store.myAnswer
-                  ? 'Answer saved. You can change it until the clock runs out.'
-                  : 'Tap an answer before the clock runs out.'
+                : hasSubmitted
+                  ? 'Answer submitted and locked. Waiting for others…'
+                  : selectedOption
+                    ? 'Tap Submit to lock your answer.'
+                    : 'Select an answer, then tap Submit to lock it.'
             }}
           </p>
         </div>
       </div>
     </main>
+
+    <!-- host-ended modal -->
+    <dialog ref="closedDialogRef" class="modal">
+      <div class="modal-box text-center">
+        <h3 class="text-lg font-bold">Quiz has ended by the host</h3>
+        <p class="py-4 text-sm opacity-80">{{ store.closedMessage || 'The host ended the quiz.' }}</p>
+        <div class="modal-action justify-center">
+          <button class="btn btn-primary" @click="done">Back to home</button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+      </form>
+    </dialog>
   </div>
 </template>

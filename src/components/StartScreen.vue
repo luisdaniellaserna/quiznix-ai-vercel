@@ -15,13 +15,14 @@ const emit = defineEmits<{
       timePerQuestion?: number
     },
   ]
+  'join-group': [payload: { code: string; name: string }]
 }>()
 
 const props = defineProps<{
   returnFromQuiz: boolean
 }>()
 
-type Step = 'landing' | 'mode' | 'form'
+type Step = 'landing' | 'mode' | 'form' | 'groupChoice' | 'groupJoin'
 
 const topic = ref('')
 const extraTopics = ref<string[]>([])
@@ -33,6 +34,9 @@ const maxParticipants = ref(10)
 const timePerQuestion = ref(MODE_CONFIG.easy.timerSeconds)
 const timeTouched = ref(false)
 const step = ref<Step>('landing')
+const joinCode = ref('')
+const joinName = ref('')
+const joinCodeFromUrl = new URLSearchParams(window.location.search).get('room')?.toUpperCase().slice(0, 6) ?? ''
 
 const allTopics = computed(() => extraTopics.value.filter((item) => item !== ''))
 
@@ -150,12 +154,39 @@ function pickGameMode(selected: GameMode) {
   gameMode.value = selected
   topic.value = ''
   extraTopics.value = []
-  step.value = 'form'
+  if (selected === 'group') {
+    joinCode.value = joinCodeFromUrl
+    joinName.value = ''
+    step.value = 'groupChoice'
+  } else {
+    step.value = 'form'
+  }
   scrollToStep('setup')
 }
 
+function pickGroupAction(action: 'create' | 'join') {
+  if (action === 'create') {
+    step.value = 'form'
+  } else {
+    joinCode.value = joinCodeFromUrl
+    step.value = 'groupJoin'
+  }
+  scrollToStep('setup')
+}
+
+const canJoinGroup = computed(() => joinCode.value.trim().length === 6 && joinName.value.trim() !== '')
+
+function submitJoinGroup() {
+  if (!canJoinGroup.value) return
+  emit('join-group', { code: joinCode.value.trim().toUpperCase(), name: joinName.value.trim() })
+}
+
 function backToMode() {
-  step.value = 'mode'
+  if (gameMode.value === 'group') {
+    step.value = 'groupChoice'
+  } else {
+    step.value = 'mode'
+  }
   scrollToStep('setup')
 }
 
@@ -196,17 +227,17 @@ function start() {
 
     <!-- navbar -->
     <header class="relative z-20">
-      <nav class="mx-auto flex w-full max-w-4xl items-center justify-between px-8 pb-8 pt-12">
+      <nav class="mx-auto flex w-full max-w-4xl items-center justify-between px-4 pb-6 pt-8 sm:px-6 sm:pb-8 sm:pt-12 lg:px-8">
         <span class="text-2xl font-black tracking-tight">Quiznix AI</span>
         <SettingsMenu />
       </nav>
     </header>
 
     <!-- hero -->
-    <section class="relative z-10 mx-auto max-w-4xl px-6 pt-12 text-center">
+    <section class="relative z-10 mx-auto max-w-4xl px-6 pt-8 text-center sm:pt-12">
       <div class="relative inline-block">
         <svg
-          class="sparkle sparkle-a absolute -left-10 -top-4 h-8 w-8 fill-current text-primary/70 drop-shadow-[0_2px_10px_color-mix(in_oklab,var(--color-primary)_35%,transparent)]"
+          class="sparkle sparkle-a absolute -left-6 -top-2 hidden h-6 w-6 fill-current text-primary/70 drop-shadow-[0_2px_10px_color-mix(in_oklab,var(--color-primary)_35%,transparent)] sm:-left-10 sm:-top-4 sm:block sm:h-8 sm:w-8"
           style="rotate: -12deg"
           viewBox="0 0 24 24"
         >
@@ -215,7 +246,7 @@ function start() {
           />
         </svg>
         <svg
-          class="sparkle sparkle-b absolute -right-14 top-0 h-10 w-10 fill-current text-secondary/70 drop-shadow-[0_2px_10px_color-mix(in_oklab,var(--color-secondary)_35%,transparent)]"
+          class="sparkle sparkle-b absolute -right-8 top-0 hidden h-8 w-8 fill-current text-secondary/70 drop-shadow-[0_2px_10px_color-mix(in_oklab,var(--color-secondary)_35%,transparent)] sm:-right-14 sm:block sm:h-10 sm:w-10"
           style="rotate: 12deg"
           viewBox="0 0 24 24"
         >
@@ -224,7 +255,7 @@ function start() {
           />
         </svg>
         <svg
-          class="sparkle sparkle-c absolute -right-20 top-1/2 h-7 w-7 fill-current text-accent/70 drop-shadow-[0_2px_10px_color-mix(in_oklab,var(--color-accent)_35%,transparent)]"
+          class="sparkle sparkle-c absolute -right-10 top-1/2 hidden h-6 w-6 fill-current text-accent/70 drop-shadow-[0_2px_10px_color-mix(in_oklab,var(--color-accent)_35%,transparent)] sm:-right-20 sm:block sm:h-7 sm:w-7"
           style="rotate: -6deg"
           viewBox="0 0 24 24"
         >
@@ -232,7 +263,7 @@ function start() {
             d="M12 0C13.5 8.5 15.5 10.5 24 12C15.5 13.5 13.5 15.5 12 24C10.5 15.5 8.5 13.5 0 12C8.5 10.5 10.5 8.5 12 0Z"
           />
         </svg>
-        <h1 class="text-5xl font-black leading-tight tracking-tight md:text-7xl">
+        <h1 class="text-4xl font-black leading-tight tracking-tight sm:text-5xl md:text-7xl">
           Get addicted<br />to learning
         </h1>
       </div>
@@ -285,10 +316,10 @@ function start() {
       id="setup"
       class="relative z-10 mx-auto w-full max-w-3xl px-6 pb-24 pt-10"
     >
-      <div class="relative mx-auto mt-16 max-w-3xl">
+      <div class="relative mx-auto mt-8 max-w-3xl sm:mt-16">
         <div class="rounded-2xl bg-base-100 shadow-2xl">
-          <span class="absolute -left-10 -top-8 -rotate-12 text-6xl drop-shadow-xl">🎮</span>
-          <span class="absolute -right-8 bottom-6 rotate-12 text-6xl drop-shadow-xl">👥</span>
+          <span class="absolute -left-6 -top-6 hidden -rotate-12 text-4xl drop-shadow-xl sm:-left-10 sm:-top-8 sm:block sm:text-6xl">🎮</span>
+          <span class="absolute -right-6 bottom-4 hidden rotate-12 text-4xl drop-shadow-xl sm:-right-8 sm:bottom-6 sm:block sm:text-6xl">👥</span>
 
           <div class="border-b border-base-300 px-6 py-4">
             <div
@@ -298,7 +329,7 @@ function start() {
             </div>
           </div>
 
-          <div class="grid gap-5 p-8 sm:p-10 sm:grid-cols-2">
+          <div class="grid gap-5 p-6 sm:p-10 sm:grid-cols-2">
             <button
               class="group rounded-2xl border-2 border-base-300 p-6 text-left transition hover:border-primary hover:shadow-lg focus:outline-none"
               @click="pickGameMode('solo')"
@@ -316,7 +347,7 @@ function start() {
               <span class="text-4xl">👥</span>
               <h3 class="mt-3 text-lg font-bold text-base-content">Group</h3>
               <p class="mt-1 text-sm text-base-content/70">
-                Host a live quiz. Friends join from their phones with a room code.
+                Host a live quiz. Friends join from their gadgets with a room code.
               </p>
             </button>
           </div>
@@ -333,12 +364,125 @@ function start() {
       </div>
     </section>
 
-    <!-- quiz setup (chosen mode) -->
-    <section v-else id="setup" class="relative z-10 mx-auto w-full max-w-3xl px-6 pb-24 pt-10">
-      <div class="relative mx-auto mt-16 max-w-3xl">
+    <!-- group: choose create or join -->
+    <section
+      v-else-if="step === 'groupChoice'"
+      id="setup"
+      class="relative z-10 mx-auto w-full max-w-3xl px-6 pb-24 pt-10"
+    >
+      <div class="relative mx-auto mt-8 max-w-3xl sm:mt-16">
         <div class="rounded-2xl bg-base-100 shadow-2xl">
-          <span class="absolute -left-10 -top-8 -rotate-12 text-6xl drop-shadow-xl">📜</span>
-          <span class="absolute -right-8 bottom-6 rotate-12 text-6xl drop-shadow-xl">🧩</span>
+          <span class="absolute -left-6 -top-6 hidden -rotate-12 text-4xl drop-shadow-xl sm:-left-10 sm:-top-8 sm:block sm:text-6xl">👥</span>
+          <span class="absolute -right-6 bottom-4 hidden rotate-12 text-4xl drop-shadow-xl sm:-right-8 sm:bottom-6 sm:block sm:text-6xl">🔗</span>
+
+          <div class="border-b border-base-300 px-6 py-4">
+            <div
+              class="flex items-center justify-center gap-2 text-base font-semibold text-base-content"
+            >
+              <span class="text-primary">▣</span> Group — what do you want to do?
+            </div>
+          </div>
+
+          <div class="grid gap-5 p-6 sm:p-10 sm:grid-cols-2">
+            <button
+              class="group rounded-2xl border-2 border-base-300 p-6 text-left transition hover:border-primary hover:shadow-lg focus:outline-none"
+              @click="pickGroupAction('create')"
+            >
+              <span class="text-4xl">🚀</span>
+              <h3 class="mt-3 text-lg font-bold text-base-content">Create room</h3>
+              <p class="mt-1 text-sm text-base-content/70">
+                Pick topics and host a live quiz. Share the 6-letter code.
+              </p>
+            </button>
+            <button
+              class="group rounded-2xl border-2 border-base-300 p-6 text-left transition hover:border-primary hover:shadow-lg focus:outline-none"
+              @click="pickGroupAction('join')"
+            >
+              <span class="text-4xl">🔑</span>
+              <h3 class="mt-3 text-lg font-bold text-base-content">Join room</h3>
+              <p class="mt-1 text-sm text-base-content/70">
+                Have a code? Enter it and join from your gadget.
+              </p>
+            </button>
+          </div>
+
+          <div class="border-t border-base-300 px-6 py-4 text-center">
+            <button
+              class="text-sm font-semibold text-base-content/60 underline-offset-4 hover:underline"
+              @click="backToMode"
+            >
+              ← Back
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- group: join with code -->
+    <section
+      v-else-if="step === 'groupJoin'"
+      id="setup"
+      class="relative z-10 mx-auto w-full max-w-3xl px-6 pb-24 pt-10"
+    >
+      <div class="relative mx-auto mt-8 max-w-3xl sm:mt-16">
+        <div class="rounded-2xl bg-base-100 shadow-2xl">
+          <span class="absolute -left-6 -top-6 hidden -rotate-12 text-4xl drop-shadow-xl sm:-left-10 sm:-top-8 sm:block sm:text-6xl">🔑</span>
+          <span class="absolute -right-6 bottom-4 hidden rotate-12 text-4xl drop-shadow-xl sm:-right-8 sm:bottom-6 sm:block sm:text-6xl">👋</span>
+
+          <div class="border-b border-base-300 px-6 py-4">
+            <div
+              class="flex items-center justify-center gap-2 text-base font-semibold text-base-content"
+            >
+              <span class="text-primary">▣</span> Join a live quiz
+            </div>
+          </div>
+
+          <form class="grid gap-5 p-6 sm:p-10" @submit.prevent="submitJoinGroup">
+            <p class="text-center text-sm opacity-70">Enter the room code your host shared and your name.</p>
+            <label class="form-control">
+              <span class="label font-semibold">Room code</span>
+              <input
+                v-model="joinCode"
+                type="text"
+                maxlength="6"
+                placeholder="ABC123"
+                class="input input-bordered input-lg w-full rounded-xl text-center text-xl font-black tracking-[0.2em] uppercase focus:outline-none sm:text-2xl sm:tracking-[0.3em]"
+                @input="(e) => (joinCode = (e.target as HTMLInputElement).value.toUpperCase())"
+              />
+            </label>
+            <label class="form-control">
+              <span class="label font-semibold">Your name</span>
+              <input
+                v-model="joinName"
+                type="text"
+                maxlength="24"
+                placeholder="e.g. Ana"
+                class="input input-bordered input-lg w-full rounded-xl focus:outline-none"
+              />
+            </label>
+            <button type="submit" class="btn btn-primary mt-2 h-14 rounded-full text-lg font-semibold" :disabled="!canJoinGroup">
+              Join room
+            </button>
+          </form>
+
+          <div class="border-t border-base-300 px-6 py-4 text-center">
+            <button
+              class="text-sm font-semibold text-base-content/60 underline-offset-4 hover:underline"
+              @click="step = 'groupChoice'; scrollToStep('setup')"
+            >
+              ← Back to group options
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- quiz setup (chosen mode) -->
+    <section v-else-if="step === 'form'" id="setup" class="relative z-10 mx-auto w-full max-w-3xl px-6 pb-24 pt-10">
+      <div class="relative mx-auto mt-8 max-w-3xl sm:mt-16">
+        <div class="rounded-2xl bg-base-100 shadow-2xl">
+          <span class="absolute -left-6 -top-6 hidden -rotate-12 text-4xl drop-shadow-xl sm:-left-10 sm:-top-8 sm:block sm:text-6xl">📜</span>
+          <span class="absolute -right-6 bottom-4 hidden rotate-12 text-4xl drop-shadow-xl sm:-right-8 sm:bottom-6 sm:block sm:text-6xl">🧩</span>
 
           <!-- app top bar -->
           <div class="border-b border-base-300 px-6 py-4">
@@ -350,7 +494,7 @@ function start() {
           </div>
 
           <!-- setup form -->
-          <form class="grid gap-5 p-8 sm:p-10" @submit.prevent="start" @keydown.enter.prevent>
+          <form class="grid gap-5 p-6 sm:p-10" @submit.prevent="start" @keydown.enter.prevent>
             <div>
               <label class="label text-base font-semibold text-base-content">Topic</label>
               <div class="flex gap-2">
@@ -379,7 +523,7 @@ function start() {
                   {{ item }}
                   <button
                     type="button"
-                    class="btn btn-xs btn-circle btn-ghost"
+                    class="btn btn-xs btn-circle btn-ghost min-h-7 min-w-7"
                     :aria-label="`Remove ${item}`"
                     @click="removeTopic(index)"
                   >

@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { roomServerOrigin, useGroupStore } from '../stores/groupStore'
 import { useCountdown } from '../composables/useCountdown'
 import SettingsMenu from './SettingsMenu.vue'
@@ -13,7 +13,21 @@ const copied = ref(false)
 
 const answeredCount = computed(() => Object.keys(store.liveAnswers).length)
 const isLastQuestion = computed(() => store.currentIndex + 1 >= store.total)
-const canAdvance = computed(() => countdown.expired.value || answeredCount.value > 0)
+const allAnswered = computed(
+  () => store.players.length > 0 && answeredCount.value >= store.players.length,
+)
+const canAdvance = computed(() => countdown.expired.value || allAnswered.value || answeredCount.value > 0)
+
+// no dead air: when everyone submitted, auto-advance after a short pause
+watch(allAnswered, (done) => {
+  if (done && store.phase === 'question' && !countdown.expired.value) {
+    window.setTimeout(() => {
+      if (store.phase === 'question' && allAnswered.value && !countdown.expired.value) {
+        store.nextQuestion()
+      }
+    }, 1200)
+  }
+})
 
 const correctAnswer = computed(() => store.hostQuestions[store.currentIndex]?.correct_answer ?? '')
 
@@ -81,7 +95,14 @@ function next() {
   store.nextQuestion()
 }
 
-function cancel() {
+const exitDialogRef = ref<HTMLDialogElement | null>(null)
+
+function requestExit() {
+  exitDialogRef.value?.showModal()
+}
+
+function confirmExit() {
+  exitDialogRef.value?.close()
   store.closeRoom()
   emit('leave')
 }
@@ -93,13 +114,20 @@ function finish() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-base-100 text-base-content">
+  <div class="min-h-screen overflow-x-hidden bg-base-100 text-base-content">
     <header class="navbar bg-base-200 px-4 py-4 shadow-sm">
       <div class="navbar-start">
         <span class="text-xl font-bold">Quiznix AI</span>
         <span class="badge badge-secondary badge-sm mx-2 hidden sm:inline-flex">Host</span>
       </div>
-      <div class="navbar-end">
+      <div class="navbar-end gap-2">
+        <button
+          v-if="store.phase === 'lobby' || store.phase === 'question'"
+          class="btn btn-ghost btn-sm"
+          @click="requestExit"
+        >
+          Exit
+        </button>
         <SettingsMenu />
       </div>
     </header>
@@ -170,7 +198,7 @@ function finish() {
         <div class="card-body items-center gap-4 text-center">
           <div>
             <span class="label text-base font-semibold opacity-70">Room code</span>
-            <div class="text-5xl font-black tracking-[0.35em]">{{ store.roomCode }}</div>
+            <div class="break-all text-3xl font-black tracking-[0.2em] sm:text-4xl sm:tracking-[0.3em] md:text-5xl md:tracking-[0.35em]">{{ store.roomCode }}</div>
           </div>
           <p class="max-w-md text-sm opacity-70">
             Players open Quiznix AI on their gadgets, enter this code and their name to join.
@@ -201,7 +229,7 @@ function finish() {
             >
               🚀 Start game
             </button>
-            <button class="btn btn-ghost" @click="cancel">Cancel</button>
+            <button class="btn btn-ghost" @click="requestExit">Exit</button>
           </div>
         </div>
       </div>
@@ -223,22 +251,24 @@ function finish() {
             :value="store.currentIndex + 1"
             :max="store.total"
           />
-          <h2 class="text-2xl font-bold">{{ store.question }}</h2>
+          <h2 class="break-words text-xl font-bold sm:text-2xl">{{ store.question }}</h2>
           <p class="text-sm opacity-70">
             {{ answeredCount }} / {{ store.players.length }} answered
+            <span v-if="allAnswered" class="badge badge-success badge-sm ml-2">All in!</span>
           </p>
           <div class="grid gap-2">
             <div
               v-for="option in store.options"
               :key="option"
-              class="flex items-center justify-between rounded-xl border p-4"
+              class="flex items-center justify-between gap-3 rounded-xl border p-4"
               :class="optionBarClass(option)"
             >
-              <span>{{ option }}</span>
-              <span class="font-black">{{ optionCount(option) }}</span>
+              <span class="min-w-0 break-words text-left">{{ option }}</span>
+              <span class="shrink-0 font-black">{{ optionCount(option) }}</span>
             </div>
           </div>
-          <div class="flex items-center justify-between">
+          <div class="flex items-center justify-between gap-2">
+            <button class="btn btn-ghost btn-sm" @click="requestExit">Exit quiz</button>
             <span v-if="!canAdvance" class="text-sm opacity-60">Waiting for answers…</span>
             <button class="btn btn-primary ml-auto" :disabled="!canAdvance" @click="next">
               {{ isLastQuestion ? 'See results' : 'Next question' }}
@@ -247,5 +277,23 @@ function finish() {
         </div>
       </div>
     </main>
+
+    <!-- host exit verification -->
+    <dialog ref="exitDialogRef" class="modal">
+      <div class="modal-box">
+        <h3 class="text-lg font-bold">Exit quiz?</h3>
+        <p class="py-4 text-sm opacity-80">
+          This will end the quiz for everyone. Players will see “Quiz has ended by the host”.
+          Are you sure you want to exit?
+        </p>
+        <div class="modal-action">
+          <button class="btn btn-ghost" @click="exitDialogRef?.close()">Cancel</button>
+          <button class="btn btn-error" @click="confirmExit">Exit quiz</button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+      </form>
+    </dialog>
   </div>
 </template>
