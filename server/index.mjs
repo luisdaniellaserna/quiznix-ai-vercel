@@ -107,9 +107,35 @@ function handleMessage(ws, raw) {
       }
       case 'join': {
         const { code, playerId } = manager.joinRoom(clientId, message.code, message.name)
+        // ensure roomClients entry exists (host grace may have kept it)
+        if (!roomClients.has(code)) {
+          roomClients.set(code, { hostClientId: manager.rooms.get(code)?.hostClientId ?? null, players: new Map() })
+        }
         roomClients.get(code).players.set(playerId, clientId)
         clientInfo.set(clientId, { code, role: 'player', playerId })
         console.log(`[room ${code}] player ${playerId} joined as "${message.name}"`)
+        break
+      }
+      case 'rejoin': {
+        const { code, playerId } = manager.rejoin(clientId, message.code, message.playerId, message.name)
+        if (!roomClients.has(code)) {
+          roomClients.set(code, { hostClientId: manager.rooms.get(code)?.hostClientId ?? null, players: new Map() })
+        }
+        roomClients.get(code).players.set(playerId, clientId)
+        clientInfo.set(clientId, { code, role: 'player', playerId })
+        console.log(`[room ${code}] player ${playerId} rejoined as "${message.name}"`)
+        break
+      }
+      case 'rejoinHost': {
+        const { code } = manager.rejoinHost(clientId, message.code)
+        const entry = roomClients.get(code)
+        if (entry) {
+          entry.hostClientId = clientId
+        } else {
+          roomClients.set(code, { hostClientId: clientId, players: new Map() })
+        }
+        clientInfo.set(clientId, { code, role: 'host' })
+        console.log(`[room ${code}] host rejoined`)
         break
       }
       case 'start-game':
@@ -175,13 +201,24 @@ wss.on('connection', (ws) => {
     }
     if (info.role === 'host') {
       manager.hostDisconnected(clientId)
-      console.log(`[room ${info.code}] host disconnected; room closed`)
-      cleanupRoom(info.code)
+      const entry = roomClients.get(info.code)
+      if (entry) entry.hostClientId = null
+      clientInfo.delete(clientId)
+      console.log(`[room ${info.code}] host disconnected — grace 60s`)
     } else {
       manager.playerDisconnected(clientId)
-      roomClients.get(info.code)?.players.delete(info.playerId)
+      const entry = roomClients.get(info.code)
+      if (entry) {
+        for (const [pid, cid] of entry.players) {
+          if (cid === clientId) {
+            entry.players.set(pid, null)
+            break
+          }
+        }
+        // keep entry for 90s grace; rejoin will restore
+      }
       clientInfo.delete(clientId)
-      console.log(`[room ${info.code}] player ${info.playerId} disconnected`)
+      console.log(`[room ${info.code}] player ${info.playerId} disconnected — grace 90s`)
     }
   })
 })
@@ -202,6 +239,34 @@ setInterval(() => {
     cleanupRoom(code)
   }
 }, SWEEP_INTERVAL_MS)
+
+// more frequent grace sweep for 60s host / 90s player rejoin windows
+setInterval(() => {
+  const before = new Set(manager.rooms.keys())
+  manager.sweep()
+  // clean server's roomClients for rooms that were purged (host grace expiry)
+  for (const code of Array.from(roomClients.keys())) {
+    if (!manager.rooms.has(code)) {
+      roomClients.delete(code)
+    } else {
+      const room = manager.rooms.get(code)
+      const entry = roomClients.get(code)
+      if (entry) {
+        for (const [pid, cid] of Array.from(entry.players)) {
+          if (cid === null && !room.players.has(pid)) {
+            entry.players.delete(pid)
+          }
+        }
+      }
+    }
+  }
+  // also purge any pending host grace that was not caught (safety)
+  for (const code of before) {
+    if (!manager.rooms.has(code) && roomClients.has(code)) {
+      roomClients.delete(code)
+    }
+  }
+}, 10_000)
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {

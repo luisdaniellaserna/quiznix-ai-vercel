@@ -336,8 +336,9 @@ test('closeRoom is host-only, closes the room, and prevents further joins', () =
   assert.throws(() => manager.joinRoom('player-2', code, 'Ben'), /not found/i)
 })
 
-test('host disconnect ends the room and notifies players', () => {
-  const { manager, sends } = makeHarness()
+test('host disconnect keeps 60s grace for rejoin before ending room', () => {
+  let now = NOW
+  const { manager, sends } = makeHarness({ now: () => now })
   const { code } = manager.createRoom('host-1', {
     topic: 'JS',
     timerSeconds: TIMER,
@@ -348,29 +349,78 @@ test('host disconnect ends the room and notifies players', () => {
 
   manager.hostDisconnected('host-1')
 
-  assert.deepEqual(lastSentTo(sends, 'players'), { type: 'host-left' })
-  assert.throws(() => manager.joinRoom('player-2', code, 'Ben'), /not found/i)
+  // within grace, room still exists and no host-left yet
+  assert.equal(manager.rooms.has(code), true)
+  assert.equal(sends.filter((s) => s.message.type === 'host-left').length, 0)
+  // rejoin within grace succeeds
+  manager.rejoinHost('host-2', code)
+  assert.equal(manager.rooms.get(code).hostClientId, 'host-2')
+  // after rejoin, new player can still join
+  manager.joinRoom('player-2', code, 'Ben')
+  assert.equal(manager.rooms.get(code).players.size, 2)
+
+  // grace expiry without rejoin should clean up
+  const { manager: m2, sends: s2 } = makeHarness({ now: () => now })
+  const { code: code2 } = m2.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  m2.joinRoom('player-1', code2, 'Ana')
+  m2.hostDisconnected('host-1')
+  now += 61_000
+  m2.sweep(now)
+  assert.deepEqual(lastSentTo(s2, 'players'), { type: 'host-left' })
+  assert.equal(m2.rooms.has(code2), false)
+  assert.throws(() => m2.joinRoom('player-2', code2, 'Ben'), /not found/i)
 })
 
-test('player disconnect removes the player and broadcasts the updated roster', () => {
-  const { manager, sends } = makeHarness()
+test('player disconnect keeps 90s grace and allows same-name reclaim', () => {
+  let now = NOW
+  const { manager } = makeHarness({ now: () => now })
   const { code } = manager.createRoom('host-1', {
     topic: 'JS',
     timerSeconds: TIMER,
     maxPlayers: 10,
     questions: makeQuestions(2),
   })
-  const ben = manager.joinRoom('player-2', code, 'Ben').playerId
-  manager.joinRoom('player-1', code, 'Ana')
+  manager.joinRoom('player-2', code, 'Ben')
+  const ana = manager.joinRoom('player-1', code, 'Ana').playerId
 
   manager.playerDisconnected('player-1')
-  manager.startGame('host-1')
 
-  assert.deepEqual(lastSentTo(sends, 'host'), {
-    type: 'lobby-updated',
-    players: [{ playerId: ben, name: 'Ben' }],
+  // within grace, player still in room (not removed), no roster update yet
+  assert.equal(manager.rooms.get(code).players.has(ana), true)
+  assert.equal(manager.rooms.get(code).players.get(ana).clientId, null)
+  // same name can reclaim within grace via rejoin
+  manager.rejoin('player-1b', code, ana, 'Ana')
+  assert.equal(manager.rooms.get(code).players.get(ana).clientId, 'player-1b')
+  // also same-name reclaim via join
+  manager.playerDisconnected('player-1b')
+  manager.joinRoom('player-3', code, 'Ana')
+  assert.equal(manager.rooms.get(code).players.size, 2)
+  // original Ana entry reclaimed, still 2 players
+
+  // after grace expiry, player is removed and roster updates
+  const { manager: m2b } = makeHarness({ now: () => now })
+  const { code: code2 } = m2b.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
   })
-  assert.throws(() => manager.submitAnswer('player-1', 'C'), /not found/i)
+  m2b.joinRoom('player-1', code2, 'Ana')
+  const ben2 = m2b.joinRoom('player-2', code2, 'Ben').playerId
+  m2b.playerDisconnected('player-1')
+  now += 91_000
+  m2b.sweep(now)
+  assert.equal(m2b.rooms.get(code2).players.has(ben2), true)
+  assert.equal(m2b.rooms.get(code2).players.size, 1)
+  assert.throws(() => m2b.rejoin('player-1', code2, ana, 'Ana'), /No pending slot|grace/i)
+  // after sweep, startGame works with remaining player
+  m2b.startGame('host-1')
+  assert.equal(m2b.rooms.get(code2).phase, 'question')
 })
 
 test('sweep removes stale rooms but keeps fresh ones', () => {

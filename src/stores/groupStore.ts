@@ -55,6 +55,37 @@ export const useGroupStore = defineStore('group', () => {
   const closedMessage = ref('')
   const error = ref('')
 
+  const STORAGE_KEY = 'quiznix-group'
+  function persistSession() {
+    try {
+      sessionStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          code: roomCode.value,
+          playerId: playerId.value,
+          playerName: playerName.value,
+          role: role.value,
+          topic: topic.value,
+          hostQuestions: hostQuestions.value,
+          maxPlayers: maxPlayers.value,
+        }),
+      )
+    } catch {}
+  }
+  function clearSession() {
+    try {
+      sessionStorage.removeItem(STORAGE_KEY)
+    } catch {}
+  }
+  function loadSession(): { code: string; playerId: string | null; playerName: string; role: GroupRole } | null {
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY)
+      return raw ? JSON.parse(raw) : null
+    } catch {
+      return null
+    }
+  }
+
   const UNREACHABLE_MESSAGE = `Cannot reach the room server at ${roomServerUrl()}. Start it with \`npm run dev:all\` (or \`npm run server\`), then try again.`
 
   function send(message: GroupClientMessage) {
@@ -95,6 +126,20 @@ export const useGroupStore = defineStore('group', () => {
       for (const message of queued) {
         socket?.send(JSON.stringify(message))
       }
+      // auto-rejoin on reconnect (screen-off / background grace) using stored session
+      if (queued.length === 0 && shouldReconnect) {
+        const sess = loadSession()
+        if (sess && sess.code && sess.role === 'player' && sess.playerId) {
+          // only rejoin if we are still in a game that expects it
+          if (phase.value === 'lobby' || phase.value === 'question' || phase.value === 'connecting') {
+            socket?.send(JSON.stringify({ type: 'rejoin', code: sess.code, playerId: sess.playerId, name: sess.playerName || playerName.value }))
+          }
+        } else if (sess && sess.code && sess.role === 'host') {
+          if (phase.value === 'lobby' || phase.value === 'question' || phase.value === 'connecting') {
+            socket?.send(JSON.stringify({ type: 'rejoinHost', code: sess.code }))
+          }
+        }
+      }
     }
     socket.onmessage = (event) => handle(JSON.parse(event.data) as GroupServerMessage)
     socket.onerror = () => {
@@ -123,12 +168,14 @@ export const useGroupStore = defineStore('group', () => {
       case 'room-created':
         roomCode.value = message.code
         phase.value = 'lobby'
+        persistSession()
         break
       case 'joined':
         playerId.value = message.playerId
         roomCode.value = message.roomCode
         players.value = message.players
         phase.value = 'lobby'
+        persistSession()
         break
       case 'lobby-updated':
         players.value = message.players
@@ -208,6 +255,7 @@ export const useGroupStore = defineStore('group', () => {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
     }
+    clearSession()
     phase.value = 'closed'
     closedMessage.value = message
   }
@@ -292,7 +340,22 @@ export const useGroupStore = defineStore('group', () => {
     }
     pending = []
     reconnectAttempts = 0
+    clearSession()
     reset()
+  }
+
+  // reconnect immediately when tab becomes visible again (screen-off) or network returns
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && shouldReconnect && (phase.value === 'lobby' || phase.value === 'question' || phase.value === 'connecting')) {
+        connect()
+      }
+    })
+    window.addEventListener('online', () => {
+      if (shouldReconnect && (phase.value === 'lobby' || phase.value === 'question' || phase.value === 'connecting')) {
+        connect()
+      }
+    })
   }
 
   return {

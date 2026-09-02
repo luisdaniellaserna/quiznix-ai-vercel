@@ -5,6 +5,8 @@ const MAX_IDLE_MS = 2 * 60 * 60 * 1000
 const ANSWER_GRACE_MS = 1500
 const POINTS_BASE = 10
 const POINTS_MIN = 5
+const PLAYER_GRACE_MS = 90_000
+const HOST_GRACE_MS = 60_000
 
 /**
  * Authoritative, transport-free state machine for group quiz rooms.
@@ -53,6 +55,7 @@ export class RoomManager {
     this.rooms.set(code, {
       code,
       hostClientId: clientId,
+      hostDisconnectedAt: null,
       topic: String(topic ?? ''),
       timerSeconds,
       maxPlayers,
@@ -76,16 +79,44 @@ export class RoomManager {
     if (room.phase !== 'lobby') {
       throw new Error('The game has already started.')
     }
-    if (room.players.size >= room.maxPlayers) {
-      throw new Error('This room is full.')
-    }
     const trimmed = String(name ?? '').trim()
     if (trimmed === '' || trimmed.length > MAX_NAME_LENGTH) {
       throw new Error(`A player name is required (1-${MAX_NAME_LENGTH} characters).`)
     }
+    // same-name reclaim within grace (covers screen-off without playerId)
+    for (const [pid, p] of room.players) {
+      if (p.name === trimmed && p.clientId === null) {
+        if (p.disconnectedAt != null && this.now() - p.disconnectedAt > PLAYER_GRACE_MS) {
+          room.players.delete(pid)
+          continue
+        }
+        p.clientId = clientId
+        p.disconnectedAt = null
+        this.playerRooms.set(clientId, { code: room.code, playerId: pid })
+        const players = this.playersOf(room)
+        this.emit(room.code, pid, { type: 'joined', playerId: pid, name: p.name, roomCode: room.code, players }, clientId)
+        this.broadcastRoster(room)
+        if (room.phase === 'question') {
+          this.emit(room.code, pid, {
+            type: 'question-started',
+            index: room.index,
+            total: room.questions.length,
+            question: room.questions[room.index].question,
+            options: this.optionsOf(room, room.index),
+            timerSeconds: room.timerSeconds,
+            deadline: room.deadline,
+            correctAnswer: room.questions[room.index].correct_answer,
+          }, clientId)
+        }
+        return { code: room.code, playerId: pid }
+      }
+    }
+    if (room.players.size >= room.maxPlayers) {
+      throw new Error('This room is full.')
+    }
 
     const playerId = `p-${++this.playerSeq}`
-    room.players.set(playerId, { clientId, name: trimmed, answers: new Map() })
+    room.players.set(playerId, { clientId, name: trimmed, answers: new Map(), disconnectedAt: null })
     this.playerRooms.set(clientId, { code: room.code, playerId })
     const players = this.playersOf(room)
     this.emit(
@@ -163,9 +194,69 @@ export class RoomManager {
   }
 
   hostDisconnected(clientId) {
-    const room = this.roomOfHost(clientId)
-    this.emit(room.code, 'players', { type: 'host-left' })
-    this.deleteRoom(room)
+    const code = this.hostRooms.get(clientId)
+    if (!code) return
+    const room = this.rooms.get(code)
+    if (!room) {
+      this.hostRooms.delete(clientId)
+      return
+    }
+    // keep room for HOST_GRACE_MS so host can rejoin via Wake Lock / screen-off
+    this.hostRooms.delete(clientId)
+    room.hostClientId = null
+    room.hostDisconnectedAt = this.now()
+    // do not emit host-left immediately — give host 60s to rejoin; players will see reconnect window
+    // actual deletion handled lazily on rejoin attempt / next host action / sweep
+  }
+
+  rejoinHost(clientId, code) {
+    const roomCode = String(code).trim().toUpperCase()
+    const room = this.rooms.get(roomCode)
+    if (!room) {
+      throw new Error('Room not found. Check the code and try again.')
+    }
+    if (room.hostClientId) {
+      throw new Error('Host already connected.')
+    }
+    if (room.hostDisconnectedAt != null && this.now() - room.hostDisconnectedAt > HOST_GRACE_MS) {
+      this.deleteRoom(room)
+      throw new Error('Host grace period expired. Room closed.')
+    }
+    room.hostClientId = clientId
+    room.hostDisconnectedAt = null
+    this.hostRooms.set(clientId, roomCode)
+    // sync current state to rejoined host
+    this.emit(roomCode, 'host', { type: 'room-created', code: roomCode }, clientId)
+    if (room.phase === 'lobby') {
+      this.broadcastRoster(room)
+    } else if (room.phase === 'question') {
+      this.emit(roomCode, 'host', {
+        type: 'question-started',
+        index: room.index,
+        total: room.questions.length,
+        question: room.questions[room.index].question,
+        options: this.optionsOf(room, room.index),
+        timerSeconds: room.timerSeconds,
+        deadline: room.deadline,
+        correctAnswer: room.questions[room.index].correct_answer,
+      }, clientId)
+      // replay live answers so host sees who answered
+      for (const [playerId, player] of room.players) {
+        const ans = player.answers.get(room.index)
+        if (ans) {
+          this.emit(roomCode, 'host', {
+            type: 'answer-updated',
+            playerId,
+            name: player.name,
+            option: ans.option,
+            correct: ans.option === room.questions[room.index].correct_answer,
+          }, clientId)
+        }
+      }
+    } else if (room.phase === 'finished') {
+      this.emit(roomCode, 'host', { type: 'game-finished', leaderboard: this.leaderboard(room) }, clientId)
+    }
+    return { code: roomCode }
   }
 
   playerDisconnected(clientId) {
@@ -178,17 +269,111 @@ export class RoomManager {
       this.playerRooms.delete(clientId)
       return
     }
-    room.players.delete(entry.playerId)
+    const player = room.players.get(entry.playerId)
+    if (player) {
+      player.clientId = null
+      player.disconnectedAt = this.now()
+    }
     this.playerRooms.delete(clientId)
-    this.broadcastRoster(room)
+    // keep player in room for PLAYER_GRACE_MS; do not broadcast removal yet — allows same-name reclaim
+  }
+
+  rejoin(clientId, code, playerId, name) {
+    const roomCode = String(code).trim().toUpperCase()
+    const room = this.rooms.get(roomCode)
+    if (!room) {
+      throw new Error('Room not found. Check the code and try again.')
+    }
+    const trimmedName = String(name ?? '').trim()
+    // try by playerId first (most secure)
+    let player = room.players.get(playerId)
+    if (player && player.clientId === null) {
+      if (player.disconnectedAt != null && this.now() - player.disconnectedAt > PLAYER_GRACE_MS) {
+        room.players.delete(playerId)
+        throw new Error('Rejoin grace period expired. Please join as new player.')
+      }
+      player.clientId = clientId
+      player.disconnectedAt = null
+      if (trimmedName) player.name = trimmedName
+      this.playerRooms.set(clientId, { code: roomCode, playerId })
+      const players = this.playersOf(room)
+      this.emit(roomCode, playerId, { type: 'joined', playerId, name: player.name, roomCode, players }, clientId)
+      this.broadcastRoster(room)
+      // sync current question if game in progress
+      if (room.phase === 'question') {
+        this.emit(roomCode, playerId, {
+          type: 'question-started',
+          index: room.index,
+          total: room.questions.length,
+          question: room.questions[room.index].question,
+          options: this.optionsOf(room, room.index),
+          timerSeconds: room.timerSeconds,
+          deadline: room.deadline,
+          correctAnswer: room.questions[room.index].correct_answer,
+        }, clientId)
+      } else if (room.phase === 'finished') {
+        this.emit(roomCode, playerId, { type: 'game-finished', leaderboard: this.leaderboard(room) }, clientId)
+      }
+      return { code: roomCode, playerId }
+    }
+    // fallback: same name reclaim within grace (covers new device / lost playerId)
+    for (const [pid, p] of room.players) {
+      if (p.name === trimmedName && p.clientId === null) {
+        if (p.disconnectedAt != null && this.now() - p.disconnectedAt > PLAYER_GRACE_MS) {
+          room.players.delete(pid)
+          continue
+        }
+        p.clientId = clientId
+        p.disconnectedAt = null
+        this.playerRooms.set(clientId, { code: roomCode, playerId: pid })
+        const players = this.playersOf(room)
+        this.emit(roomCode, pid, { type: 'joined', playerId: pid, name: p.name, roomCode, players }, clientId)
+        this.broadcastRoster(room)
+        if (room.phase === 'question') {
+          this.emit(roomCode, pid, {
+            type: 'question-started',
+            index: room.index,
+            total: room.questions.length,
+            question: room.questions[room.index].question,
+            options: this.optionsOf(room, room.index),
+            timerSeconds: room.timerSeconds,
+            deadline: room.deadline,
+            correctAnswer: room.questions[room.index].correct_answer,
+          }, clientId)
+        }
+        return { code: roomCode, playerId: pid }
+      }
+    }
+    throw new Error('No pending slot for rejoin. Please join as new player with a different code.')
   }
 
   sweep(nowMs = this.now()) {
     const removed = []
     for (const room of this.rooms.values()) {
-      if (nowMs - room.createdAt > MAX_IDLE_MS) {
+      // host grace expiry — notify players then delete
+      if (room.hostClientId === null && room.hostDisconnectedAt != null && nowMs - room.hostDisconnectedAt > HOST_GRACE_MS) {
+        this.emit(room.code, 'players', { type: 'host-left' })
         this.deleteRoom(room)
         removed.push(room.code)
+        continue
+      }
+      // player grace expiry
+      let rosterChanged = false
+      for (const [pid, player] of Array.from(room.players)) {
+        if (player.clientId === null && player.disconnectedAt != null && nowMs - player.disconnectedAt > PLAYER_GRACE_MS) {
+          room.players.delete(pid)
+          rosterChanged = true
+          for (const [cid, entry] of this.playerRooms) {
+            if (entry.playerId === pid) this.playerRooms.delete(cid)
+          }
+        }
+      }
+      if (rosterChanged) {
+        this.broadcastRoster(room)
+      }
+      if (nowMs - room.createdAt > MAX_IDLE_MS) {
+        this.deleteRoom(room)
+        if (!removed.includes(room.code)) removed.push(room.code)
       }
     }
     return removed
@@ -282,9 +467,15 @@ export class RoomManager {
 
   deleteRoom(room) {
     this.rooms.delete(room.code)
-    this.hostRooms.delete(room.hostClientId)
+    if (room.hostClientId) this.hostRooms.delete(room.hostClientId)
     for (const player of room.players.values()) {
-      this.playerRooms.delete(player.clientId)
+      if (player.clientId) this.playerRooms.delete(player.clientId)
     }
+    // also clear any stale playerRooms entries for disconnected grace players
+    const toDelete = []
+    for (const [cid, entry] of this.playerRooms) {
+      if (entry.code === room.code) toDelete.push(cid)
+    }
+    for (const cid of toDelete) this.playerRooms.delete(cid)
   }
 }

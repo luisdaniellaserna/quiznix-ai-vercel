@@ -41,6 +41,8 @@ export type GroupClientMessage =
       questions: QuestionFormat[]
     }
   | { type: 'join'; code: string; name: string }
+  | { type: 'rejoin'; code: string; playerId: string; name: string }
+  | { type: 'rejoinHost'; code: string }
   | { type: 'start-game' }
   | { type: 'answer'; option: string }
   | { type: 'next-question' }

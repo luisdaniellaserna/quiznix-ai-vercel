@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { roomServerOrigin, useGroupStore } from '../stores/groupStore'
 import { useCountdown } from '../composables/useCountdown'
 import SettingsMenu from './SettingsMenu.vue'
@@ -43,7 +43,45 @@ watch(
   },
 )
 
-const correctAnswer = computed(() => store.hostQuestions[store.currentIndex]?.correct_answer ?? '')
+const correctAnswer = computed(() => store.correctAnswer || store.hostQuestions[store.currentIndex]?.correct_answer || '')
+const hasWakeLock = typeof navigator !== 'undefined' && 'wakeLock' in navigator
+
+// keep host screen awake during lobby/question so phone sleep doesn't kill the WS
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let wakeLock: any | null = null
+async function requestWakeLock() {
+  try {
+    if ('wakeLock' in navigator) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      wakeLock = await (navigator as unknown as { wakeLock: { request: (t: string) => Promise<any> } }).wakeLock.request('screen')
+    }
+  } catch {}
+}
+function releaseWakeLock() {
+  try {
+    wakeLock?.release()
+  } catch {}
+  wakeLock = null
+}
+watch(
+  () => store.phase,
+  (phase) => {
+    if (phase === 'lobby' || phase === 'question') {
+      void requestWakeLock()
+    } else {
+      releaseWakeLock()
+    }
+  },
+  { immediate: true },
+)
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && (store.phase === 'lobby' || store.phase === 'question')) {
+      void requestWakeLock()
+    }
+  })
+}
+onUnmounted(() => releaseWakeLock())
 
 function optionCount(option: string) {
   return Object.values(store.liveAnswers).filter((a) => a.option === option).length
@@ -147,6 +185,9 @@ function finish() {
     </header>
 
     <main class="mx-auto w-full max-w-3xl p-4">
+      <div v-if="(store.phase === 'lobby' || store.phase === 'question') && !hasWakeLock" class="alert alert-warning mb-4 text-sm">
+        <span>Keep this tab visible — some phones disconnect when the screen locks. Tap Exit only to end.</span>
+      </div>
       <!-- closed by the host or a lost connection -->
       <div v-if="store.phase === 'closed'" class="card mt-4 shadow-xl">
         <div class="card-body items-center text-center">
@@ -283,15 +324,12 @@ function finish() {
           </div>
 
           <!-- 3-5s reveal: show correct answer to host (and players see via their own reveal) -->
-          <div v-if="countdown.expired.value && store.hostQuestions[store.currentIndex]" class="alert alert-success">
-            <span>Correct answer: <strong>{{ store.hostQuestions[store.currentIndex]?.correct_answer }}</strong></span>
+          <div v-if="countdown.expired.value && correctAnswer" class="alert alert-success">
+            <span>Correct answer: <strong>{{ correctAnswer }}</strong></span>
             <span class="text-xs opacity-70">Next in a few seconds…</span>
           </div>
-          <div
-            v-else-if="allAnswered && !countdown.expired.value"
-            class="alert alert-info"
-          >
-            <span>All answers in! Revealing correct answer: <strong>{{ store.hostQuestions[store.currentIndex]?.correct_answer }}</strong></span>
+          <div v-else-if="allAnswered && !countdown.expired.value && correctAnswer" class="alert alert-info">
+            <span>All answers in! Revealing correct answer: <strong>{{ correctAnswer }}</strong></span>
           </div>
 
           <div class="flex items-center justify-between gap-2">
