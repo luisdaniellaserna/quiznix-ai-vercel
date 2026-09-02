@@ -138,6 +138,17 @@ function done() {
         </div>
       </div>
 
+      <!-- joining — prevents flash of the join form/host code after tapping Join -->
+      <div v-else-if="store.phase === 'connecting'" class="card mt-4 shadow-xl">
+        <div class="card-body items-center gap-3 text-center">
+          <span class="loading loading-spinner loading-lg text-primary"></span>
+          <h2 class="text-lg font-bold">Joining room…</h2>
+          <p class="text-sm opacity-70">
+            Connecting as {{ store.playerName || playerName || 'player' }} — please wait.
+          </p>
+        </div>
+      </div>
+
       <!-- final leaderboard -->
       <div v-else-if="store.phase === 'finished'" class="card mt-4 shadow-xl">
         <div class="card-body">

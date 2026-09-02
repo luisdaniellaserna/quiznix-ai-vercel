@@ -135,6 +135,10 @@ export const useGroupStore = defineStore('group', () => {
         break
       case 'error':
         error.value = message.message
+        // failed join/create should return to the form instead of staying stuck on loading
+        if (phase.value === 'connecting') {
+          phase.value = 'idle'
+        }
         break
     }
   }
@@ -191,7 +195,9 @@ export const useGroupStore = defineStore('group', () => {
   function joinRoom(code: string, name: string) {
     reset()
     role.value = 'player'
+    phase.value = 'connecting'
     playerName.value = name
+    error.value = ''
     connect()
     send({ type: 'join', code: code.trim().toUpperCase(), name })
   }
