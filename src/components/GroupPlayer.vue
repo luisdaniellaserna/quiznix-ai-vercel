@@ -64,7 +64,7 @@ function done() {
   <div class="min-h-screen bg-base-100 text-base-content">
     <header class="navbar bg-base-200 px-4 py-4 shadow-sm">
       <div class="navbar-start">
-        <span class="text-xl font-bold">Quizly AI</span>
+        <span class="text-xl font-bold">Quiznix AI</span>
         <span v-if="store.roomCode" class="badge badge-soft badge-primary badge-sm mx-2">
           Room {{ store.roomCode }}
         </span>

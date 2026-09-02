@@ -8,7 +8,7 @@ import type {
 } from '../groupProtocol'
 
 export type GroupRole = 'none' | 'host' | 'player'
-export type GroupPhase = 'idle' | 'lobby' | 'question' | 'finished' | 'closed'
+export type GroupPhase = 'idle' | 'connecting' | 'lobby' | 'question' | 'finished' | 'closed'
 
 /** The WebSocket URL of the room server, as configured or derived from the page host. */
 export function roomServerUrl() {
@@ -16,8 +16,9 @@ export function roomServerUrl() {
   if (envUrl) {
     return envUrl
   }
-  // in dev, the page host is the LAN host, so phones can reach the room server too
-  return `ws://${window.location.hostname}:8787`
+  // ws:// is blocked from https:// pages (mixed content) — use wss:// when the page is https
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${protocol}//${window.location.hostname}:8787`
 }
 
 /** The HTTP origin of the room server (for endpoints like /lan). */
@@ -173,6 +174,7 @@ export const useGroupStore = defineStore('group', () => {
   }) {
     reset()
     role.value = 'host'
+    phase.value = 'connecting'
     topic.value = settings.topic
     hostQuestions.value = settings.questions
     maxPlayers.value = settings.maxPlayers

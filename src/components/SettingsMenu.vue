@@ -39,7 +39,19 @@ const themes = [
   'abyss',
   'silk',
 ]
-const currentTheme = ref('cupcake')
+const THEME_STORAGE_KEY = 'quiznix-theme'
+function getInitialTheme() {
+  try {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY)
+    if (saved && themes.includes(saved)) return saved
+  } catch {}
+  return 'light'
+}
+const currentTheme = ref(getInitialTheme())
+// apply theme immediately so the page matches the stored choice before any interaction
+try {
+  document.documentElement.setAttribute('data-theme', currentTheme.value)
+} catch {}
 const reportDetail = ref('')
 const reportEmail = (import.meta.env.VITE_REPORT_EMAIL as string | undefined)?.trim() ?? ''
 
@@ -80,11 +92,15 @@ function openMenu(menu: 'theme' | 'help' | 'report') {
 
 function selectTheme(theme: string) {
   currentTheme.value = theme
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, theme)
+    document.documentElement.setAttribute('data-theme', theme)
+  } catch {}
   themeDialogRef.value?.close()
 }
 
 function submitReport() {
-  const subject = encodeURIComponent('Quizly AI — bug report')
+  const subject = encodeURIComponent('Quiznix AI — bug report')
   const body = encodeURIComponent(reportDetail.value.trim() || 'No details provided.')
   const recipient = reportEmail ? `${reportEmail}?` : ''
   window.location.href = `mailto:${recipient}subject=${subject}&body=${body}`

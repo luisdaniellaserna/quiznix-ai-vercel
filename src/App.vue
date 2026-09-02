@@ -273,7 +273,7 @@ function reset() {
     <template v-else>
       <header class="navbar bg-base-200 shadow-sm px-4 py-4">
         <div class="navbar-start">
-          <span class="text-xl font-bold">Quizly AI</span>
+          <span class="text-xl font-bold">Quiznix AI</span>
         </div>
         <div class="navbar-end">
           <SettingsMenu />

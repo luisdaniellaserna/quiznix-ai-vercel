@@ -25,7 +25,7 @@ function isPortBusy(port: number): Promise<boolean> {
 function roomServerDevPlugin(): Plugin {
   let child: ChildProcess | null = null
   return {
-    name: 'quiztify-room-server',
+    name: 'quiznix-room-server',
     configureServer(server) {
       server.httpServer?.once('listening', async () => {
         if (await isPortBusy(ROOM_SERVER_PORT)) {

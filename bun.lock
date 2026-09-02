@@ -2,7 +2,7 @@
   "lockfileVersion": 1,
   "workspaces": {
     "": {
-      "name": "vue-gemini-app",
+      "name": "quiznix-ai",
       "dependencies": {
         "@google/genai": "^1.21.0",
         "openai": "^5.23.1",

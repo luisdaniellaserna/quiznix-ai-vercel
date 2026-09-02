@@ -64,7 +64,7 @@ async function joinLink() {
   const isLoopback = hostname === 'localhost' || hostname === '127.0.0.1'
   const host = isLoopback ? ((await resolveLanHost()) ?? hostname) : hostname
   const port = window.location.port ? `:${window.location.port}` : ''
-  return `http://${host}${port}${window.location.pathname}?room=${store.roomCode}`
+  return `${window.location.protocol}//${host}${port}${window.location.pathname}?room=${store.roomCode}`
 }
 
 async function copyLink() {
@@ -96,7 +96,7 @@ function finish() {
   <div class="min-h-screen bg-base-100 text-base-content">
     <header class="navbar bg-base-200 px-4 py-4 shadow-sm">
       <div class="navbar-start">
-        <span class="text-xl font-bold">Quizly AI</span>
+        <span class="text-xl font-bold">Quiznix AI</span>
         <span class="badge badge-secondary badge-sm mx-2 hidden sm:inline-flex">Host</span>
       </div>
       <div class="navbar-end">
@@ -110,6 +110,15 @@ function finish() {
         <div class="card-body items-center text-center">
           <h2 class="text-xl font-bold">{{ store.closedMessage }}</h2>
           <button class="btn btn-primary" @click="emit('leave')">Back to home</button>
+        </div>
+      </div>
+
+      <!-- creating room — replaces the brief idle flash before the server replies -->
+      <div v-else-if="store.phase === 'connecting'" class="card mt-4 shadow-xl">
+        <div class="card-body items-center gap-3 text-center">
+          <span class="loading loading-spinner loading-lg text-primary"></span>
+          <h2 class="text-lg font-bold">Creating room…</h2>
+          <p class="text-sm opacity-70">Contacting the room server.</p>
         </div>
       </div>
 
@@ -164,7 +173,7 @@ function finish() {
             <div class="text-5xl font-black tracking-[0.35em]">{{ store.roomCode }}</div>
           </div>
           <p class="max-w-md text-sm opacity-70">
-            Players open Quizly AI on their phones, enter this code and their name to join.
+            Players open Quiznix AI on their gadgets, enter this code and their name to join.
           </p>
           <button class="btn btn-outline btn-sm" @click="copyLink">
             {{ copied ? 'Copied!' : 'Copy join link' }}

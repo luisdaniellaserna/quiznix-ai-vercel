@@ -54,7 +54,7 @@ function removeTopic(index: number) {
 
 // restore saved settings only when returning from a solo quiz (not on hard refresh)
 if (props.returnFromQuiz) {
-  const saved = localStorage.getItem('quiztify-setup')
+  const saved = localStorage.getItem('quiznix-setup')
   if (saved) {
     try {
       const s = JSON.parse(saved) as {
@@ -98,7 +98,7 @@ const canStart = computed(() => {
 
 function saveSettings() {
   localStorage.setItem(
-    'quiztify-setup',
+    'quiznix-setup',
     JSON.stringify({
       topics: allTopics.value,
       mode: mode.value,
@@ -197,7 +197,7 @@ function start() {
     <!-- navbar -->
     <header class="relative z-20">
       <nav class="mx-auto flex w-full max-w-4xl items-center justify-between px-8 pb-8 pt-12">
-        <span class="text-2xl font-black tracking-tight">Quizly AI</span>
+        <span class="text-2xl font-black tracking-tight">Quiznix AI</span>
         <SettingsMenu />
       </nav>
     </header>

@@ -1,4 +1,4 @@
-# Quizly AI
+# Quiznix AI
 
 AI-powered quiz generator. Type any topic — or several — and get a quiz generated
 on demand, then play it solo at your own pace or live against friends in a
@@ -93,7 +93,7 @@ work out of the box.
 | `VITE_GEMINI_API_KEY` | Gemini API key (used when `VITE_AI_PROVIDER="gemini"`).          |
 | `VITE_DEEPSEEK_API_KEY` | DeepSeek API key (used when `VITE_AI_PROVIDER="deepseek"`).    |
 | `VITE_AI_PROVIDER`    | `"gemini"` (default) or `"deepseek"`.                            |
-| `VITE_WS_URL`         | Room server WebSocket URL; defaults to `ws://<page-host>:8787`.  |
+| `VITE_WS_URL`         | Room server WebSocket URL; defaults to `ws://<page-host>:8787` (`wss://` when page is `https:`). For production (e.g. Vercel at `https://quiznix.vercel.app`) you **must** host the `server/` separately (Render/Fly/Railway with TLS) and set `VITE_WS_URL=wss://<your-ws-host>` — Vercel's static hosting cannot run the persistent `ws` server. |
 | `VITE_REPORT_EMAIL`   | Recipient of the in-app bug report email; unaddressed when empty.|
 
 ## How the modes work
@@ -134,6 +134,21 @@ work out of the box.
   automatically. If other devices can't connect, allow Node through the
   firewall (Windows: allow `node.exe` on Private networks).
 - All room state lives in memory on the server; closing it ends all games.
+
+#### Production / Vercel
+
+- `https://quiznix.vercel.app` is `https://`, so browsers block `ws://` (mixed content). The client now auto-selects `wss://` when the page is `https:` (`src/stores/groupStore.ts:14`).
+- Vercel only serves the static SPA — it does **not** run `server/index.mjs`. You must deploy the `server/` elsewhere with TLS (e.g. Render, Fly.io, Railway):
+  ```sh
+  # on the WS host (e.g. Render)
+  # Start command: node server/index.mjs
+  # Exposes wss://your-ws-host.onrender.com  (PORT is injected by the platform)
+  ```
+  Then set in Vercel dashboard → Settings → Environment Variables:
+  ```
+  VITE_WS_URL=wss://your-ws-host.onrender.com
+  ```
+  Redeploy. If `VITE_WS_URL` is unset on `https://quiznix.vercel.app`, the app tries `wss://quiznix.vercel.app:8787` which has no server and group mode will show “Cannot reach the room server”.
 
 ## Scripts
 
