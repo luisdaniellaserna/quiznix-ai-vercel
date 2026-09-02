@@ -44,6 +44,7 @@ const shuffledOptions = computed(() => [...store.options].sort(() => Math.random
 
 const selectedOption = ref<string | null>(null)
 const hasSubmitted = computed(() => store.myAnswer !== null)
+const isRevealed = computed(() => hasSubmitted.value || countdown.expired.value)
 
 function formatTime(ms: number) {
   const seconds = Math.round(ms / 1000)
@@ -275,9 +276,11 @@ function done() {
               :key="option"
               class="btn btn-lg h-auto min-h-12 justify-start whitespace-normal break-words py-3 text-left rounded-xl"
               :class="{
-                'btn-primary': selectedOption === option || store.myAnswer === option,
-                'btn-outline': selectedOption !== option && store.myAnswer !== option,
-                'opacity-60': hasSubmitted && store.myAnswer !== option,
+                'btn-success': isRevealed && option === store.correctAnswer,
+                'btn-error': isRevealed && option === store.myAnswer && option !== store.correctAnswer,
+                'btn-primary': !isRevealed && (selectedOption === option || store.myAnswer === option),
+                'btn-outline': !isRevealed && selectedOption !== option && store.myAnswer !== option,
+                'opacity-60': isRevealed && option !== store.correctAnswer && option !== store.myAnswer,
               }"
               :disabled="countdown.expired.value || hasSubmitted"
               @click="selectOption(option)"
@@ -293,10 +296,11 @@ function done() {
             {{ hasSubmitted ? 'Submitted ✓' : countdown.expired.value ? 'Time up' : 'Submit answer' }}
           </button>
 
-          <!-- 3-5s reveal: show correct answer after time is up -->
-          <div v-if="countdown.expired.value && store.correctAnswer" class="alert alert-success justify-center gap-2">
-            <span>Correct answer: <strong>{{ store.correctAnswer }}</strong></span>
-            <span class="text-xs opacity-70">Next in a few seconds…</span>
+          <!-- highlight correct answer immediately after submit (and on time up) -->
+          <div v-if="isRevealed && store.correctAnswer" class="alert justify-center gap-2" :class="store.myAnswer === store.correctAnswer ? 'alert-success' : 'alert-error'">
+            <span v-if="store.myAnswer === store.correctAnswer">Correct! Answer: <strong>{{ store.correctAnswer }}</strong></span>
+            <span v-else>Correct answer: <strong>{{ store.correctAnswer }}</strong></span>
+            <span class="text-xs opacity-70">{{ countdown.expired.value ? 'Next in a few seconds…' : 'Waiting for others…' }}</span>
           </div>
 
           <p class="text-center text-sm opacity-70">
