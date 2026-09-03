@@ -57,7 +57,7 @@ const reportEmail = (import.meta.env.VITE_REPORT_EMAIL as string | undefined)?.t
 
 const props = withDefaults(
   defineProps<{
-    showQuit: boolean
+    showQuit?: boolean
   }>(),
   {
     showQuit: false,
