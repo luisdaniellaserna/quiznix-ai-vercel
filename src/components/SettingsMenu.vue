@@ -55,9 +55,14 @@ try {
 const reportDetail = ref('')
 const reportEmail = (import.meta.env.VITE_REPORT_EMAIL as string | undefined)?.trim() ?? ''
 
-const props = defineProps<{
-  showQuit: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    showQuit: boolean
+  }>(),
+  {
+    showQuit: false,
+  },
+)
 const emit = defineEmits(['quit-quiz'])
 
 const dropdownRef = ref<HTMLDetailsElement | null>(null)
