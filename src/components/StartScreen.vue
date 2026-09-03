@@ -497,17 +497,17 @@ function start() {
           <form class="grid gap-5 p-6 sm:p-10" @submit.prevent="start" @keydown.enter.prevent>
             <div>
               <label class="label text-base font-semibold text-base-content">Topic</label>
-              <div class="flex gap-2">
+              <div class="flex flex-col sm:flex-row gap-2">
                 <input
                   v-model="topic"
                   type="text"
                   placeholder="Enter a topic..."
-                  class="input input-bordered input-lg flex-1 rounded-xl focus:outline-none"
+                  class="input input-bordered input-lg w-full rounded-xl focus:outline-none"
                   @keyup.enter.prevent="addTopic"
                 />
                 <button
                   type="button"
-                  class="btn btn-primary rounded-xl"
+                  class="btn btn-primary rounded-xl w-full sm:w-auto shrink-0"
                   :disabled="topic.trim() === ''"
                   @click="addTopic"
                 >
@@ -532,7 +532,7 @@ function start() {
                 </span>
               </div>
             </div>
-            <div class="grid gap-5 sm:grid-cols-2">
+            <div class="grid gap-5 grid-cols-1 sm:grid-cols-2">
               <label class="text-base font-semibold text-base-content">
                 <span class="label">Difficulty</span>
                 <select
@@ -555,7 +555,7 @@ function start() {
                 />
               </label>
             </div>
-            <div v-if="gameMode === 'group'" class="grid gap-5 sm:grid-cols-2">
+            <div v-if="gameMode === 'group'" class="grid gap-5 grid-cols-1 sm:grid-cols-2">
               <label class="text-base font-semibold text-base-content">
                 <span class="label">Max participants</span>
                 <input
@@ -580,7 +580,7 @@ function start() {
             </div>
             <div
               v-if="gameMode === 'solo'"
-              class="flex items-center justify-between gap-4 rounded-xl border border-base-300 bg-base-200/50 p-4"
+              class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-xl border border-base-300 bg-base-200/50 p-4"
             >
               <label class="label cursor-pointer gap-4" for="timer-toggle">
                 <span>

@@ -282,7 +282,7 @@ function reset() {
           <span class="text-xl font-bold">Quiznix AI</span>
         </div>
         <div class="navbar-end">
-          <SettingsMenu />
+          <SettingsMenu :show-quit="status === 'ready'" @quit-quiz="reset" />
         </div>
       </header>
 
@@ -292,7 +292,6 @@ function reset() {
           @store-answer="storeAnswer"
           @end-quiz="status = 'finished'"
           @previous="removeLastAnswer"
-          @quit-quiz="reset"
           :questions="question!.results"
           :duration="MODE_CONFIG[selectedMode].timerSeconds"
           :timed="timedMode"

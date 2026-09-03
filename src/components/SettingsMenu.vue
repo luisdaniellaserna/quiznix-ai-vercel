@@ -55,10 +55,16 @@ try {
 const reportDetail = ref('')
 const reportEmail = (import.meta.env.VITE_REPORT_EMAIL as string | undefined)?.trim() ?? ''
 
+const props = defineProps<{
+  showQuit: boolean
+}>()
+const emit = defineEmits(['quit-quiz'])
+
 const dropdownRef = ref<HTMLDetailsElement | null>(null)
 const themeDialogRef = ref<HTMLDialogElement | null>(null)
 const helpDialogRef = ref<HTMLDialogElement | null>(null)
 const reportDialogRef = ref<HTMLDialogElement | null>(null)
+const quitDialogRef = ref<HTMLDialogElement | null>(null)
 let savedScrollY = 0
 
 function lockPageScroll() {
@@ -106,6 +112,16 @@ function submitReport() {
   window.location.href = `mailto:${recipient}subject=${subject}&body=${body}`
 }
 
+function askQuit() {
+  closeDropdown()
+  quitDialogRef.value?.showModal()
+}
+
+function confirmQuit() {
+  quitDialogRef.value?.close()
+  emit('quit-quiz')
+}
+
 onUnmounted(() => {
   document.documentElement.style.overflow = ''
 })
@@ -139,6 +155,15 @@ onUnmounted(() => {
           <Icon icon="lucide:circle-question-mark" class="h-4 w-4 shrink-0 opacity-80" />
           Help
         </button>
+        <button
+          class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-error hover:bg-base-300/50"
+          v-if="props.showQuit"
+          @click="askQuit"
+        >
+          <Icon icon="lucide:log-out" class="h-4 w-4 shrink-0 opacity-80" />
+          Quit quiz
+        </button>
+        <div v-if="props.showQuit" class="my-1 h-px bg-base-300"></div>
         <button
           class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-base-300/50"
           @click="openMenu('report')"
@@ -277,6 +302,21 @@ onUnmounted(() => {
         >
           Send report
         </button>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+      <button>close</button>
+    </form>
+  </dialog>
+
+  <!-- Quit -->
+  <dialog ref="quitDialogRef" class="modal">
+    <div class="modal-box">
+      <h3 class="text-lg font-bold">Quit quiz?</h3>
+      <p class="py-4">Your progress will be lost. Are you sure you want to quit?</p>
+      <div class="modal-action">
+        <button class="btn" @click="quitDialogRef?.close()">Cancel</button>
+        <button class="btn btn-error" @click="confirmQuit">Yes, quit</button>
       </div>
     </div>
     <form method="dialog" class="modal-backdrop">

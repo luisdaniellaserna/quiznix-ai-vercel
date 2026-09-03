@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { computed, onUnmounted, ref, watch } from 'vue'
 
-const emit = defineEmits(['store-answer', 'end-quiz', 'previous', 'quit-quiz'])
+const emit = defineEmits(['store-answer', 'end-quiz', 'previous'])
 
 const props = defineProps<{
   questions: QuestionFormat[]
@@ -80,7 +80,6 @@ const canGoBack = computed(() => {
 })
 
 const submitDialog = ref<HTMLDialogElement | null>(null)
-const quitDialog = ref<HTMLDialogElement | null>(null)
 
 function askSubmit() {
   submitDialog.value?.showModal()
@@ -89,15 +88,6 @@ function askSubmit() {
 function confirmSubmit() {
   submitDialog.value?.close()
   submitAnswer()
-}
-
-function askQuit() {
-  quitDialog.value?.showModal()
-}
-
-function confirmQuit() {
-  quitDialog.value?.close()
-  emit('quit-quiz')
 }
 
 watch(currentQuestion, () => {
@@ -148,11 +138,8 @@ onUnmounted(clearTimer)
         </button>
       </div>
 
-      <div class="card-actions flex-col gap-2 sm:flex-row justify-between mt-4">
-        <div class="flex gap-2">
-          <button class="btn btn-ghost text-error" @click="askQuit">Quit</button>
-          <button class="btn" @click="goBack" :disabled="!canGoBack">Back</button>
-        </div>
+      <div class="card-actions flex flex-row justify-end mt-4 gap-2">
+        <button class="btn" @click="goBack" :disabled="!canGoBack">Back</button>
         <button
           v-if="currentQuestion === props.questions.length - 1"
           class="btn btn-primary"
@@ -183,15 +170,5 @@ onUnmounted(clearTimer)
       </div>
     </dialog>
 
-    <dialog ref="quitDialog" class="modal">
-      <div class="modal-box">
-        <h3 class="text-lg font-bold">Quit quiz?</h3>
-        <p class="py-4">Your progress will be lost. Are you sure you want to quit?</p>
-        <div class="modal-action">
-          <button class="btn" @click="quitDialog?.close()">Cancel</button>
-          <button class="btn btn-error" @click="confirmQuit">Yes, quit</button>
-        </div>
-      </div>
-    </dialog>
   </div>
 </template>
