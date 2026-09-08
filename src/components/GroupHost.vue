@@ -5,6 +5,7 @@ import { useCountdown } from '../composables/useCountdown'
 import SettingsMenu from './SettingsMenu.vue'
 import ConfettiBurst from './ConfettiBurst.vue'
 import FinalLeaderboard from './FinalLeaderboard.vue'
+import LobbyChat from './LobbyChat.vue'
 
 const emit = defineEmits<{ leave: []; 'play-again': []; 'back-to-lobby': [] }>()
 
@@ -283,6 +284,9 @@ function backToLobby() {
           <p class="text-sm opacity-60">
             {{ store.players.length }} / {{ store.maxPlayers }} joined
           </p>
+          <div class="w-full text-left">
+            <LobbyChat />
+          </div>
           <div class="card-actions mt-2">
             <button
               class="btn btn-primary btn-lg"

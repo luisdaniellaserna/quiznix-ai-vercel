@@ -12,6 +12,16 @@ export interface LeaderboardEntry {
   timeSpentMs: number
 }
 
+export interface ChatMessage {
+  id: string
+  senderId: string
+  name: string
+  role: 'host' | 'player'
+  text: string
+  /** server timestamp (ms) so every client orders history the same way */
+  at: number
+}
+
 export interface ScoreboardEntry {
   playerId: string
   name: string
@@ -41,6 +51,7 @@ export type GroupServerMessage =
   | { type: 'game-finished'; leaderboard: LeaderboardEntry[] }
   | { type: 'room-resetting'; leaderboard: LeaderboardEntry[]; topic: string }
   | { type: 'room-to-lobby'; players: PlayerInfo[]; topic: string }
+  | ({ type: 'chat-received' } & ChatMessage)
   | { type: 'game-closed' }
   | { type: 'host-left' }
   | { type: 'error'; message: string }
@@ -58,6 +69,7 @@ export type GroupClientMessage =
   | { type: 'rejoinHost'; code: string }
   | { type: 'start-game' }
   | { type: 'answer'; option: string }
+  | { type: 'chat'; id: string; text: string }
   | { type: 'next-question' }
   | { type: 'restart-room' }
   | { type: 'back-to-lobby' }

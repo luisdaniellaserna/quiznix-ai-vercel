@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type {
+  ChatMessage,
   GroupClientMessage,
   GroupServerMessage,
   LeaderboardEntry,
@@ -64,6 +65,9 @@ export const useGroupStore = defineStore('group', () => {
   const answeredCount = ref(0)
   const totalPlayers = ref(0)
   const leaderboard = ref<LeaderboardEntry[] | null>(null)
+  // Lobby group chat. The server only relays messages — every client keeps its
+  // own copy in localStorage so a refresh restores the visible history.
+  const chatMessages = ref<ChatMessage[]>([])
   // Final leaderboard from the most recent finished round, kept so the host's
   // "Play again" transition (and the player's waiting card) can show the
   // previous results even after the room has moved into 'between-rounds'.
@@ -73,6 +77,56 @@ export const useGroupStore = defineStore('group', () => {
   const evictedMessage = ref('')
 
   const STORAGE_KEY = 'quiznix-group'
+  const MAX_CHAT_MESSAGES = 100
+  const MAX_CHAT_LENGTH = 200
+
+  function chatStorageKey(code: string) {
+    return `quiznix-chat-${code}`
+  }
+
+  function isChatMessage(value: unknown): value is ChatMessage {
+    if (typeof value !== 'object' || value === null) return false
+    const m = value as Record<string, unknown>
+    return (
+      typeof m.id === 'string' &&
+      typeof m.senderId === 'string' &&
+      typeof m.name === 'string' &&
+      (m.role === 'host' || m.role === 'player') &&
+      typeof m.text === 'string' &&
+      typeof m.at === 'number'
+    )
+  }
+
+  function loadChat(code: string) {
+    chatMessages.value = []
+    if (!code) return
+    try {
+      const raw = localStorage.getItem(chatStorageKey(code))
+      if (!raw) return
+      const parsed: unknown = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        chatMessages.value = parsed.filter(isChatMessage).slice(-MAX_CHAT_MESSAGES)
+      }
+    } catch {}
+  }
+
+  function persistChat() {
+    try {
+      if (!roomCode.value) return
+      localStorage.setItem(
+        chatStorageKey(roomCode.value),
+        JSON.stringify(chatMessages.value.slice(-MAX_CHAT_MESSAGES)),
+      )
+    } catch {}
+  }
+
+  function clearChat(code: string) {
+    chatMessages.value = []
+    if (!code) return
+    try {
+      localStorage.removeItem(chatStorageKey(code))
+    } catch {}
+  }
 
   // Position of this player in the latest scoreboard (1-based), or 0 if not on it.
   const myRank = computed(() => {
@@ -193,6 +247,7 @@ export const useGroupStore = defineStore('group', () => {
       case 'room-created':
         roomCode.value = message.code
         phase.value = 'lobby'
+        loadChat(message.code)
         persistSession()
         break
       case 'joined':
@@ -200,6 +255,7 @@ export const useGroupStore = defineStore('group', () => {
         roomCode.value = message.roomCode
         players.value = message.players
         phase.value = 'lobby'
+        loadChat(message.roomCode)
         persistSession()
         break
       case 'lobby-updated':
@@ -239,6 +295,22 @@ export const useGroupStore = defineStore('group', () => {
         answeredCount.value = message.answeredCount
         totalPlayers.value = message.totalPlayers
         break
+      case 'chat-received': {
+        if (chatMessages.value.some((m) => m.id === message.id)) break
+        chatMessages.value = [
+          ...chatMessages.value,
+          {
+            id: message.id,
+            senderId: message.senderId,
+            name: message.name,
+            role: message.role,
+            text: message.text,
+            at: message.at,
+          },
+        ].slice(-MAX_CHAT_MESSAGES)
+        persistChat()
+        break
+      }
       case 'all-answered':
         allAnswered.value = true
         correctAnswer.value = message.correctAnswer
@@ -328,6 +400,7 @@ export const useGroupStore = defineStore('group', () => {
     totalPlayers.value = 0
     leaderboard.value = null
     lastFinalLeaderboard.value = null
+    chatMessages.value = []
     closedMessage.value = ''
     error.value = ''
     evictedMessage.value = ''
@@ -427,6 +500,12 @@ export const useGroupStore = defineStore('group', () => {
     send({ type: 'answer', option })
   }
 
+  function sendChat(text: string) {
+    const trimmed = text.trim().slice(0, MAX_CHAT_LENGTH)
+    if (!trimmed) return
+    send({ type: 'chat', id: crypto.randomUUID(), text: trimmed })
+  }
+
   function nextQuestion() {
     send({ type: 'next-question' })
   }
@@ -495,6 +574,8 @@ export const useGroupStore = defineStore('group', () => {
     reconnectAttempts = 0
     clearSession()
     releaseActiveSession()
+    // explicit leave drops the local chat copy; a mere refresh keeps it
+    clearChat(roomCode.value)
     reset()
   }
 
@@ -560,6 +641,8 @@ export const useGroupStore = defineStore('group', () => {
     scoreboard,
     answeredCount,
     totalPlayers,
+    chatMessages,
+    sendChat,
     myRank,
     leaderboard,
     lastFinalLeaderboard,

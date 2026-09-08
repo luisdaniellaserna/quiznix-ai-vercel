@@ -8,6 +8,7 @@ const POINTS_MIN = 5
 const PLAYER_GRACE_MS = 90_000
 const HOST_GRACE_MS = 60_000
 const FORCE_REVEAL_MS = 3000
+const MAX_CHAT_LENGTH = 200
 
 /** Shared validation for host-supplied quiz content (error messages kept stable). */
 function assertValidQuiz({ questions, timerSeconds, maxPlayers }) {
@@ -349,6 +350,46 @@ export class RoomManager {
       player.answers.clear()
     }
     this.startQuestion(room, 0)
+  }
+
+  // Lobby group chat — relay only, nothing is stored server-side. Each client
+  // keeps its own copy in localStorage so a refresh restores visible history.
+  // Restricted to the lobby so answers can't be shared mid-game.
+  sendChat(clientId, { id, text }) {
+    const hostCode = this.hostRooms.get(clientId)
+    const hostRoom = hostCode ? this.rooms.get(hostCode) : undefined
+    let room = hostRoom && hostRoom.hostClientId === clientId ? hostRoom : undefined
+    let sender =
+      room !== undefined ? { senderId: clientId, name: 'Host', role: 'host' } : undefined
+    if (sender === undefined) {
+      const entry = this.playerRooms.get(clientId)
+      const playerRoom = entry ? this.rooms.get(entry.code) : undefined
+      const player = playerRoom ? playerRoom.players.get(entry.playerId) : undefined
+      if (playerRoom === undefined || player === undefined) {
+        throw new Error('Not in a room.')
+      }
+      room = playerRoom
+      sender = { senderId: entry.playerId, name: player.name, role: 'player' }
+    }
+    if (room.phase !== 'lobby') {
+      throw new Error('Chat is only available in the lobby.')
+    }
+    const trimmed = String(text ?? '').trim()
+    if (trimmed === '') {
+      throw new Error('Chat message is empty.')
+    }
+    if (trimmed.length > MAX_CHAT_LENGTH) {
+      throw new Error(`Chat messages are limited to ${MAX_CHAT_LENGTH} characters.`)
+    }
+    this.emit(room.code, 'all', {
+      type: 'chat-received',
+      id: String(id ?? ''),
+      senderId: sender.senderId,
+      name: sender.name,
+      role: sender.role,
+      text: trimmed,
+      at: this.now(),
+    })
   }
 
   // Host changed the setup (topic, difficulty, ...) after going back to the

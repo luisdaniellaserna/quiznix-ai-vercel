@@ -972,3 +972,58 @@ test('backToLobby rejects non-hosts and rooms that are not finished', () => {
   // mid-game — can't bail to the lobby
   assert.throws(() => manager.backToLobby('host-1'), /lobby/i)
 })
+
+test('sendChat relays lobby messages to the whole room without storing them', () => {
+  const { manager, sends } = makeHarness()
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(1),
+  })
+  const ana = manager.joinRoom('player-1', code, 'Ana')
+
+  manager.sendChat('player-1', { id: 'm1', text: '  Good luck!  ' })
+  manager.sendChat('host-1', { id: 'm2', text: 'Have fun!' })
+
+  const chats = sentTo(sends, 'all').filter((m) => m.type === 'chat-received')
+  assert.equal(chats.length, 2)
+  assert.deepEqual(chats[0], {
+    type: 'chat-received',
+    id: 'm1',
+    senderId: ana.playerId,
+    name: 'Ana',
+    role: 'player',
+    text: 'Good luck!',
+    at: NOW,
+  })
+  assert.deepEqual(chats[1], {
+    type: 'chat-received',
+    id: 'm2',
+    senderId: 'host-1',
+    name: 'Host',
+    role: 'host',
+    text: 'Have fun!',
+    at: NOW,
+  })
+  // relay only — no history kept server-side for late joiners to fetch
+  assert.equal(manager.rooms.get(code).chatHistory, undefined)
+})
+
+test('sendChat rejects blank/overlong text, strangers, and non-lobby phases', () => {
+  const { manager } = makeHarness()
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(1),
+  })
+  manager.joinRoom('player-1', code, 'Ana')
+
+  assert.throws(() => manager.sendChat('player-1', { id: 'm1', text: '   ' }), /message/i)
+  assert.throws(() => manager.sendChat('player-1', { id: 'm2', text: 'x'.repeat(201) }), /message/i)
+  assert.throws(() => manager.sendChat('stranger-9', { id: 'm3', text: 'hi' }), /room/i)
+  manager.startGame('host-1')
+  // no answer-sharing once questions are live
+  assert.throws(() => manager.sendChat('player-1', { id: 'm4', text: 'hi' }), /lobby/i)
+})

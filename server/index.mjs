@@ -144,6 +144,9 @@ function handleMessage(ws, raw) {
       case 'answer':
         manager.submitAnswer(clientId, message.option)
         break
+      case 'chat':
+        manager.sendChat(clientId, { id: message.id, text: message.text })
+        break
       case 'next-question':
         manager.nextQuestion(clientId)
         break

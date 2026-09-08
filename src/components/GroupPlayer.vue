@@ -5,6 +5,7 @@ import { useCountdown } from '../composables/useCountdown'
 import SettingsMenu from './SettingsMenu.vue'
 import ConfettiBurst from './ConfettiBurst.vue'
 import FinalLeaderboard from './FinalLeaderboard.vue'
+import LobbyChat from './LobbyChat.vue'
 
 const emit = defineEmits<{
   leave: []
@@ -300,6 +301,9 @@ function done() {
             >
               👤 {{ player.name }}
             </span>
+          </div>
+          <div class="w-full text-left">
+            <LobbyChat />
           </div>
           <button class="btn btn-ghost" @click="done">Leave lobby</button>
         </div>
