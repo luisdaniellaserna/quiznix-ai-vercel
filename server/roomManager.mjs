@@ -285,6 +285,28 @@ export class RoomManager {
     })
   }
 
+  // Host takes a finished (or between-rounds) room back to the lobby so new
+  // players can join with the same room code and the host can rematch with the
+  // same questions. Roster and playerIds are kept; per-round state is cleared.
+  backToLobby(clientId) {
+    const room = this.roomOfHost(clientId)
+    if (room.phase !== 'finished' && room.phase !== 'between-rounds') {
+      throw new Error('Can only return to the lobby after a finished game.')
+    }
+    room.phase = 'lobby'
+    room.index = -1
+    room.deadline = 0
+    room.pendingAdvance = null
+    for (const player of room.players.values()) {
+      player.answers.clear()
+    }
+    this.emit(room.code, 'all', {
+      type: 'room-to-lobby',
+      players: this.playersOf(room),
+      topic: room.topic,
+    })
+  }
+
   // Host picked new topics and the next round is ready. Server replaces the
   // questions, resets per-round state, and goes straight to question 0 (skipping
   // the lobby phase since players are already in the room).

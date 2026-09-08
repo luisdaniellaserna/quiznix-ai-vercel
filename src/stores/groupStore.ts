@@ -267,6 +267,25 @@ export const useGroupStore = defineStore('group', () => {
         myAnswer.value = null
         phase.value = 'between-rounds'
         break
+      case 'room-to-lobby':
+        // host took the room back to the lobby — same room code and roster,
+        // per-round state cleared so new players can join and the host can rematch
+        players.value = message.players
+        topic.value = message.topic
+        leaderboard.value = null
+        scoreboard.value = []
+        answeredCount.value = 0
+        totalPlayers.value = 0
+        liveAnswers.value = {}
+        currentIndex.value = 0
+        total.value = 0
+        question.value = ''
+        options.value = []
+        correctAnswer.value = ''
+        allAnswered.value = false
+        myAnswer.value = null
+        phase.value = 'lobby'
+        break
       case 'game-closed':
         if (phase.value !== 'finished') {
           close('The host ended the game.')
@@ -418,6 +437,12 @@ export const useGroupStore = defineStore('group', () => {
     send({ type: 'restart-room' })
   }
 
+  /** Host returns a finished room to the lobby. Same room code and roster, so
+   * new players can join and the host can rematch with the same questions. */
+  function backToLobby() {
+    send({ type: 'back-to-lobby' })
+  }
+
   /** Host commits the new round's topics and questions after restartRoom. */
   function startNextGame(settings: {
     topic: string
@@ -534,6 +559,7 @@ export const useGroupStore = defineStore('group', () => {
     submitAnswer,
     nextQuestion,
     restartRoom,
+    backToLobby,
     startNextGame,
     closeRoom,
     leave,

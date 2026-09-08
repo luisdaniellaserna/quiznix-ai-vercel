@@ -816,3 +816,83 @@ test('startNextGame rejects when not in between-rounds', () => {
     /finished/i,
   )
 })
+
+test('backToLobby returns a finished room to the lobby and keeps the roster', () => {
+  let currentTime = NOW
+  const { manager, sends } = makeHarness({ now: () => currentTime })
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(1),
+  })
+  const ana = manager.joinRoom('player-1', code, 'Ana')
+  manager.startGame('host-1')
+  manager.nextQuestion('host-1')
+  currentTime = NOW + 3000
+  manager.processAdvances(currentTime)
+
+  manager.backToLobby('host-1')
+
+  const room = manager.rooms.get(code)
+  assert.equal(room.phase, 'lobby')
+  assert.equal(room.index, -1)
+  // same roster and playerId, answers cleared
+  assert.equal(room.players.size, 1)
+  assert.equal(room.players.has(ana.playerId), true)
+  assert.equal(room.players.get(ana.playerId).answers.size, 0)
+  // everyone is told to show the lobby with the current roster
+  const toLobby = sentTo(sends, 'all').find((m) => m.type === 'room-to-lobby')
+  assert.ok(toLobby)
+  assert.equal(toLobby.topic, 'JS')
+  assert.equal(toLobby.players.length, 1)
+  assert.equal(toLobby.players[0].name, 'Ana')
+
+  // host can rematch with the same questions straight from the lobby
+  manager.startGame('host-1')
+  const q = lastSentTo(sends, 'all')
+  assert.equal(q.type, 'question-started')
+  assert.equal(q.index, 0)
+  assert.equal(q.total, 1)
+})
+
+test('backToLobby also works from between-rounds', () => {
+  let currentTime = NOW
+  const { manager, sends } = makeHarness({ now: () => currentTime })
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(1),
+  })
+  manager.joinRoom('player-1', code, 'Ana')
+  manager.startGame('host-1')
+  manager.nextQuestion('host-1')
+  currentTime = NOW + 3000
+  manager.processAdvances(currentTime)
+  manager.restartRoom('host-1')
+  assert.equal(manager.rooms.get(code).phase, 'between-rounds')
+
+  manager.backToLobby('host-1')
+
+  assert.equal(manager.rooms.get(code).phase, 'lobby')
+  assert.ok(sentTo(sends, 'all').find((m) => m.type === 'room-to-lobby'))
+})
+
+test('backToLobby rejects non-hosts and rooms that are not finished', () => {
+  const { manager } = makeHarness()
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  manager.joinRoom('player-1', code, 'Ana')
+
+  assert.throws(() => manager.backToLobby('player-1'), /host/i)
+  // still in lobby — nothing to go back to
+  assert.throws(() => manager.backToLobby('host-1'), /lobby/i)
+  manager.startGame('host-1')
+  // mid-game — can't bail to the lobby
+  assert.throws(() => manager.backToLobby('host-1'), /lobby/i)
+})

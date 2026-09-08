@@ -40,6 +40,7 @@ export type GroupServerMessage =
   | { type: 'all-answered'; correctAnswer: string; scoreboard: ScoreboardEntry[] }
   | { type: 'game-finished'; leaderboard: LeaderboardEntry[] }
   | { type: 'room-resetting'; leaderboard: LeaderboardEntry[]; topic: string }
+  | { type: 'room-to-lobby'; players: PlayerInfo[]; topic: string }
   | { type: 'game-closed' }
   | { type: 'host-left' }
   | { type: 'error'; message: string }
@@ -59,6 +60,7 @@ export type GroupClientMessage =
   | { type: 'answer'; option: string }
   | { type: 'next-question' }
   | { type: 'restart-room' }
+  | { type: 'back-to-lobby' }
   | {
       type: 'start-next-game'
       topic: string

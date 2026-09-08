@@ -239,8 +239,9 @@ function playAgain() {
           <h2 class="text-center text-2xl font-black">🏆 Final scores</h2>
           <p class="text-center font-medium opacity-70">{{ store.topic }}</p>
           <FinalLeaderboard :entries="store.leaderboard ?? []" />
-          <div class="card-actions mt-4">
+          <div class="card-actions mt-4 flex-wrap">
             <button class="btn btn-primary flex-1" @click="playAgain">Play again</button>
+            <button class="btn btn-outline" @click="store.backToLobby()">Back to lobby</button>
             <button class="btn btn-error" @click="finish">End exam</button>
           </div>
         </div>

@@ -150,6 +150,9 @@ function handleMessage(ws, raw) {
       case 'restart-room':
         manager.restartRoom(clientId)
         break
+      case 'back-to-lobby':
+        manager.backToLobby(clientId)
+        break
       case 'start-next-game':
         manager.startNextGame(clientId, {
           topic: message.topic,
