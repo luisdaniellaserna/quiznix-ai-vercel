@@ -1,0 +1,19 @@
+- Expects responsive layouts that stack vertically on small screens to prevent overlapping — prefers mobile-first Tailwind patterns (e.g., `flex-col sm:flex-row`, `grid-cols-1 sm:grid-cols-2`) over single-row grids that break on narrow viewports. Confidence: 0.85
+
+## AI / LLM behavior
+- Wants each new game / new topic to start a brand-new AI session with zero carryover of prior context, topics, or examples — treats per-request isolation as a hard requirement, not a nice-to-have. Confidence: 0.9
+- Prefers explicit anti-context-leakage patterns in prompts: injects a unique session id per call, adds an "ignore prior conversation" instruction, and fixes obviously wrong model ids rather than relying on provider defaults. Confidence: 0.8
+- Wants fixes scoped tightly to the reported bug — when asked to fix one issue, don't bundle unrelated changes (e.g. don't rename/swap model identifiers, don't reformat untouched code); push back on scope creep and keep the model / provider config as-is unless explicitly asked. Confidence: 0.9
+- Prefers committing and pushing changes through git workflow after fixes land — expects the assistant to review the diff, revert any out-of-scope edits before staging, run type-check and lint, and push to the working branch. Confidence: 0.7
+- When proposing a fix, wants the assistant to validate the approach first — flag subtle issues (e.g. per-tab vs shared storage, crash-recovery, race conditions, missing edge cases) before implementing. Will reply with "proceed" once satisfied, indicating they want the discussion step but will accept a more robust/expanded implementation rather than just their literal proposal. Confidence: 0.85
+
+## Group / quiz UX (multiplayer group mode)
+- In group-mode quizzes, the correct answer must NOT be shown to a quizzer the moment they submit — reveal is gated on either (a) all examinees have answered, (b) the per-question timer has expired, or (c) the host force-skips. Treating the act of submitting as consent to see the answer is wrong. Confidence: 0.9
+- When the admin/host force-skips to the next question (i.e. before everyone answered AND before the timer expired), show the correct answer for a fixed short window (~3s) on the player screen before swapping to the next question; the reveal window should be server-driven and consistent across all players, not client-side guessing. Confidence: 0.9
+- Prefers authoritative-server designs over client-side estimation for "everyone answered" signals: add explicit protocol messages (e.g. `all-answered`) so clients don't infer state from local counts that can drift due to late joins / leavers. Confidence: 0.8
+- Wants live progress visible to the examinee during a question: a "answered X/Y" count of the cohort and a "current rank" (1st/2nd/3rd… of N) showing the player's standing based on cumulative scores so far — typically surfaced as a sidebar card on the right of the question screen on wide layouts, stacking below on mobile. Reveals `—` until at least one scoreboard has been received so the rank isn't shown as 1st-of-1 prematurely. Confidence: 0.8
+
+## Workflow
+- Expects the full verification suite (type-check, lint, and tests) to be re-run after every change set — including doc/config-only edits and dependency removals — without being asked. Will explicitly challenge with "are all tests already passed?" when the assistant reports work as done without fresh verification. Confidence: 0.85
+- Treats a reported result as stale if any edits landed after the last run; wants the assistant to say plainly when it hasn't re-verified rather than implying earlier green results still hold. Confidence: 0.75
+- After completing a non-trivial code change, asks the assistant to confirm before committing/pushing (e.g. "commit and push" only after the assistant offers). Prefers the assistant to summarize what was changed and explicitly ask whether to commit, rather than auto-pushing after every task. Confidence: 0.7

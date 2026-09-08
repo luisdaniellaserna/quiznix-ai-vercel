@@ -7,6 +7,36 @@ const POINTS_BASE = 10
 const POINTS_MIN = 5
 const PLAYER_GRACE_MS = 90_000
 const HOST_GRACE_MS = 60_000
+const FORCE_REVEAL_MS = 3000
+
+/** Scoreboard entry used by players to see live rank; matches groupProtocol.ts. */
+function buildScoreboard(room) {
+  // include the current question's answers too — by the time the scoreboard is
+  // broadcast (all-answered / start of next question) every score that should
+  // count for "rank so far" is already in.
+  const lastScoredIndex = room.index
+  const entries = []
+  for (const [playerId, player] of room.players) {
+    let correct = 0
+    let score = 0
+    for (let i = 0; i <= lastScoredIndex; i++) {
+      const answer = player.answers.get(i)
+      if (answer && answer.option === room.questions[i].correct_answer) {
+        correct++
+        const ratio = answer.timeLeftMs / (room.timerSeconds * 1000)
+        score += Math.round(1000 * (POINTS_MIN + (POINTS_BASE - POINTS_MIN) * ratio))
+      }
+    }
+    entries.push({
+      playerId,
+      name: player.name,
+      score,
+      correct,
+    })
+  }
+  entries.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+  return entries
+}
 
 /**
  * Authoritative, transport-free state machine for group quiz rooms.
@@ -106,6 +136,7 @@ export class RoomManager {
             timerSeconds: room.timerSeconds,
             deadline: room.deadline,
             correctAnswer: room.questions[room.index].correct_answer,
+            scoreboard: buildScoreboard(room),
           }, clientId)
         }
         return { code: room.code, playerId: pid }
@@ -171,6 +202,28 @@ export class RoomManager {
       option,
       correct: option === room.questions[room.index].correct_answer,
     })
+    // broadcast how many players have answered so far so others can see live progress
+    this.emit(room.code, 'players', {
+      type: 'answer-progress',
+      answeredCount: this.answeredCount(room),
+      totalPlayers: room.players.size,
+    })
+    // notify everyone when the last pending player has answered, so they can reveal
+    if (room.players.size > 0 && room.players.size === this.answeredCount(room)) {
+      this.emit(room.code, 'all', {
+        type: 'all-answered',
+        correctAnswer: room.questions[room.index].correct_answer,
+        scoreboard: buildScoreboard(room),
+      })
+    }
+  }
+
+  answeredCount(room) {
+    let count = 0
+    for (const player of room.players.values()) {
+      if (player.answers.has(room.index)) count++
+    }
+    return count
   }
 
   nextQuestion(clientId) {
@@ -178,12 +231,46 @@ export class RoomManager {
     if (room.phase !== 'question') {
       throw new Error('There is no active question.')
     }
+    // host force-skipped before timer ran out and before everyone answered —
+    // give players a brief reveal of the correct answer before moving on
+    const allDone = room.players.size > 0 && room.players.size === this.answeredCount(room)
+    const timedOut = this.now() > room.deadline
+    if (!allDone && !timedOut) {
+      this.emit(room.code, 'all', {
+        type: 'all-answered',
+        correctAnswer: room.questions[room.index].correct_answer,
+        scoreboard: buildScoreboard(room),
+      })
+      this.scheduleAdvance(room, FORCE_REVEAL_MS)
+      return
+    }
+    this.advanceFromQuestion(room)
+  }
+
+  advanceFromQuestion(room) {
     const nextIndex = room.index + 1
     if (nextIndex < room.questions.length) {
       this.startQuestion(room, nextIndex)
     } else {
       room.phase = 'finished'
       this.emit(room.code, 'all', { type: 'game-finished', leaderboard: this.leaderboard(room) })
+    }
+  }
+
+  scheduleAdvance(room, delayMs) {
+    room.pendingAdvance = { scheduledAt: this.now(), delayMs }
+  }
+
+  // Driven by now() so unit tests can advance time deterministically.
+  // Called from sweep(); or directly when a host action needs an immediate check.
+  processAdvances(nowMs = this.now()) {
+    for (const room of this.rooms.values()) {
+      if (!room.pendingAdvance) continue
+      if (nowMs - room.pendingAdvance.scheduledAt < room.pendingAdvance.delayMs) continue
+      room.pendingAdvance = null
+      if (room.phase === 'question') {
+        this.advanceFromQuestion(room)
+      }
     }
   }
 
@@ -239,6 +326,7 @@ export class RoomManager {
         timerSeconds: room.timerSeconds,
         deadline: room.deadline,
         correctAnswer: room.questions[room.index].correct_answer,
+        scoreboard: buildScoreboard(room),
       }, clientId)
       // replay live answers so host sees who answered
       for (const [playerId, player] of room.players) {
@@ -310,6 +398,7 @@ export class RoomManager {
           timerSeconds: room.timerSeconds,
           deadline: room.deadline,
           correctAnswer: room.questions[room.index].correct_answer,
+          scoreboard: buildScoreboard(room),
         }, clientId)
       } else if (room.phase === 'finished') {
         this.emit(roomCode, playerId, { type: 'game-finished', leaderboard: this.leaderboard(room) }, clientId)
@@ -339,6 +428,7 @@ export class RoomManager {
             timerSeconds: room.timerSeconds,
             deadline: room.deadline,
             correctAnswer: room.questions[room.index].correct_answer,
+            scoreboard: buildScoreboard(room),
           }, clientId)
         }
         return { code: roomCode, playerId: pid }
@@ -348,6 +438,7 @@ export class RoomManager {
   }
 
   sweep(nowMs = this.now()) {
+    this.processAdvances(nowMs)
     const removed = []
     for (const room of this.rooms.values()) {
       // host grace expiry — notify players then delete
@@ -392,6 +483,7 @@ export class RoomManager {
       timerSeconds: room.timerSeconds,
       deadline: room.deadline,
       correctAnswer: room.questions[index].correct_answer,
+      scoreboard: buildScoreboard(room),
     })
   }
 

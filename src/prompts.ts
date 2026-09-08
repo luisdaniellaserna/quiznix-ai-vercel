@@ -8,11 +8,15 @@ export function buildQuizPrompt(
 ): string {
   const topicList = topics.map((topic) => `- ${topic.trim()}`).filter(Boolean).join('\n')
   return `
-      Create ${count} quiz questions split evenly across these topics:
+      Create exactly ${count} quiz questions split evenly across these topics:
       ${topicList}
       Difficulty: ${MODE_CONFIG[mode].difficulty}
       Type: Multiple Choice
       Mix the questions from different topics randomly — do not group them by topic.
+
+      The output JSON must contain a "results" array with exactly ${count} entries.
+      Do not stop early, do not summarize, and do not skip any questions.
+      Return all ${count} questions, then stop.
 
       Session: ${sessionId}
       This is a brand-new, independent quiz request. Ignore any prior conversations,

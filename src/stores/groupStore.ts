@@ -1,11 +1,19 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type {
   GroupClientMessage,
   GroupServerMessage,
   LeaderboardEntry,
   PlayerInfo,
+  ScoreboardEntry,
 } from '../groupProtocol'
+import {
+  claimActiveSession,
+  evictOtherTab,
+  getBlockingSession,
+  onEvicted,
+  releaseActiveSession,
+} from './groupTabSync'
 
 export type GroupRole = 'none' | 'host' | 'player'
 export type GroupPhase = 'idle' | 'connecting' | 'lobby' | 'question' | 'finished' | 'closed'
@@ -49,13 +57,26 @@ export const useGroupStore = defineStore('group', () => {
   const deadline = ref<number | null>(null)
   const correctAnswer = ref('')
   const myAnswer = ref<string | null>(null)
+  const allAnswered = ref(false)
   const hostQuestions = ref<QuestionFormat[]>([])
   const liveAnswers = ref<Record<string, { name: string; option: string; correct: boolean }>>({})
+  const scoreboard = ref<ScoreboardEntry[]>([])
+  const answeredCount = ref(0)
+  const totalPlayers = ref(0)
   const leaderboard = ref<LeaderboardEntry[] | null>(null)
   const closedMessage = ref('')
   const error = ref('')
+  const evictedMessage = ref('')
 
   const STORAGE_KEY = 'quiznix-group'
+
+  // Position of this player in the latest scoreboard (1-based), or 0 if not on it.
+  const myRank = computed(() => {
+    if (!playerId.value) return 0
+    const idx = scoreboard.value.findIndex((entry) => entry.playerId === playerId.value)
+    return idx === -1 ? 0 : idx + 1
+  })
+
   function persistSession() {
     try {
       sessionStorage.setItem(
@@ -180,7 +201,9 @@ export const useGroupStore = defineStore('group', () => {
       case 'lobby-updated':
         players.value = message.players
         break
-      case 'question-started':
+      case 'question-started': {
+        // players only see the correct answer for the *current* question once revealed
+        // (all-answered, timer expired, or host force-skips with a 3s reveal first)
         currentIndex.value = message.index
         total.value = message.total
         question.value = message.question
@@ -189,10 +212,15 @@ export const useGroupStore = defineStore('group', () => {
         deadline.value = message.deadline
         correctAnswer.value = message.correctAnswer
         myAnswer.value = null
+        allAnswered.value = false
         error.value = ''
         liveAnswers.value = {}
+        scoreboard.value = message.scoreboard ?? []
+        answeredCount.value = 0
+        totalPlayers.value = message.scoreboard?.length ?? players.value.length
         phase.value = 'question'
         break
+      }
       case 'answer-updated':
         liveAnswers.value = {
           ...liveAnswers.value,
@@ -202,6 +230,15 @@ export const useGroupStore = defineStore('group', () => {
             correct: message.correct,
           },
         }
+        break
+      case 'answer-progress':
+        answeredCount.value = message.answeredCount
+        totalPlayers.value = message.totalPlayers
+        break
+      case 'all-answered':
+        allAnswered.value = true
+        correctAnswer.value = message.correctAnswer
+        scoreboard.value = message.scoreboard ?? []
         break
       case 'game-finished':
         leaderboard.value = message.leaderboard
@@ -241,11 +278,16 @@ export const useGroupStore = defineStore('group', () => {
     deadline.value = null
     correctAnswer.value = ''
     myAnswer.value = null
+    allAnswered.value = false
     hostQuestions.value = []
     liveAnswers.value = {}
+    scoreboard.value = []
+    answeredCount.value = 0
+    totalPlayers.value = 0
     leaderboard.value = null
     closedMessage.value = ''
     error.value = ''
+    evictedMessage.value = ''
     // do not clear shouldReconnect here — leave() / close() handle it; createRoom/joinRoom reset it
   }
 
@@ -256,6 +298,7 @@ export const useGroupStore = defineStore('group', () => {
       reconnectTimer = null
     }
     clearSession()
+    releaseActiveSession()
     phase.value = 'closed'
     closedMessage.value = message
   }
@@ -278,6 +321,7 @@ export const useGroupStore = defineStore('group', () => {
     topic.value = settings.topic
     hostQuestions.value = settings.questions
     maxPlayers.value = settings.maxPlayers
+    claimActiveSession({ code: 'PENDING', role: 'host' })
     connect()
     send({
       type: 'create-room',
@@ -300,14 +344,35 @@ export const useGroupStore = defineStore('group', () => {
     phase.value = 'connecting'
     playerName.value = name
     error.value = ''
+    const normalizedCode = code.trim().toUpperCase()
+    claimActiveSession({ code: normalizedCode, role: 'player', playerName: name })
     connect()
-    send({ type: 'join', code: code.trim().toUpperCase(), name })
+    send({ type: 'join', code: normalizedCode, name })
+  }
+
+  /** Check whether joining another room would conflict with another live tab.
+   * Returns the live blocking session or null. UI should prompt before calling
+   * joinRoom/createRoom. */
+  function checkRoomConflict(): {
+    tabId: string
+    code: string
+    role: 'host' | 'player'
+    playerName?: string
+    ageMs: number
+  } | null {
+    return getBlockingSession()
   }
 
   /** Enters the player join flow without connecting yet (e.g. via a ?room= join link). */
   function prepareJoin() {
     reset()
     role.value = 'player'
+    // tentatively claim the slot so a second tab sees the conflict before the user enters a name
+    const params = new URLSearchParams(window.location.search)
+    const code = (params.get('room') ?? '').toUpperCase().slice(0, 6)
+    if (code.length === 6) {
+      claimActiveSession({ code, role: 'player' })
+    }
   }
 
   function startGame() {
@@ -341,7 +406,33 @@ export const useGroupStore = defineStore('group', () => {
     pending = []
     reconnectAttempts = 0
     clearSession()
+    releaseActiveSession()
     reset()
+  }
+
+  // when another tab forces us to drop our session, surface it to the UI
+  onEvicted(() => {
+    if (phase.value === 'idle' || phase.value === 'finished') return
+    const previousRoom = roomCode.value
+    if (socket) {
+      socket.onclose = null
+      socket.close()
+      socket = null
+    }
+    pending = []
+    shouldReconnect = false
+    clearSession()
+    releaseActiveSession()
+    phase.value = 'closed'
+    closedMessage.value = ''
+    evictedMessage.value = previousRoom
+      ? `You left Room ${previousRoom} because another tab took over.`
+      : 'Another tab took over this session.'
+  })
+
+  /** Forcibly claim the room slot held by another tab. Called after the user confirms. */
+  function forceTakeover(victimTabId: string) {
+    evictOtherTab(victimTabId)
   }
 
   // reconnect immediately when tab becomes visible again (screen-off) or network returns
@@ -375,11 +466,20 @@ export const useGroupStore = defineStore('group', () => {
     deadline,
     correctAnswer,
     myAnswer,
+    allAnswered,
     hostQuestions,
     liveAnswers,
+    scoreboard,
+    answeredCount,
+    totalPlayers,
+    myRank,
     leaderboard,
     closedMessage,
     error,
+    evictedMessage,
+    getBlockingSession,
+    forceTakeover,
+    checkRoomConflict,
     createRoom,
     joinRoom,
     prepareJoin,

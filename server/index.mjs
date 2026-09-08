@@ -268,6 +268,9 @@ setInterval(() => {
   }
 }, 10_000)
 
+// fast tick for the 3s force-advance reveal (sweep alone is too coarse at 10s+)
+setInterval(() => manager.processAdvances(), 250)
+
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
     console.error(`[group server] port ${PORT} is already in use.`)

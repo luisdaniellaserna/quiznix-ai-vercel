@@ -160,6 +160,7 @@ test('startGame broadcasts question-started with canonical options and a server 
     options: ['A', 'B', 'D', 'C'],
     timerSeconds: TIMER,
     deadline: NOW + TIMER * 1000,
+    scoreboard: [{ playerId: 'p-1', name: 'Ana', score: 0, correct: 0 }],
     correctAnswer: 'C',
   })
 })
@@ -279,7 +280,8 @@ test('nextQuestion advances through questions and finishes with a sorted leaderb
 })
 
 test('ties are ordered by name and unanswered questions count as wrong', () => {
-  const { manager, sends } = makeHarness()
+  let currentTime = NOW
+  const { manager, sends } = makeHarness({ now: () => currentTime })
   const { code } = manager.createRoom('host-1', {
     topic: 'JS',
     timerSeconds: TIMER,
@@ -289,8 +291,14 @@ test('ties are ordered by name and unanswered questions count as wrong', () => {
   manager.joinRoom('player-1', code, 'Zed')
   manager.joinRoom('player-2', code, 'Ava')
   manager.startGame('host-1')
+  // host force-skips the first question before anyone answers — reveal is shown for 3s,
+  // then the manager advances via sweep/processAdvances
   manager.nextQuestion('host-1')
+  currentTime = NOW + 3000
+  manager.processAdvances(currentTime)
   manager.nextQuestion('host-1')
+  currentTime = NOW + 6000
+  manager.processAdvances(currentTime)
 
   assert.deepEqual(
     lastSentTo(sends, 'all').leaderboard.map((e) => e.name),
@@ -303,7 +311,8 @@ test('ties are ordered by name and unanswered questions count as wrong', () => {
 })
 
 test('nextQuestion rejects non-hosts and calls outside a question', () => {
-  const { manager } = makeHarness()
+  let currentTime = NOW
+  const { manager } = makeHarness({ now: () => currentTime })
   const { code } = manager.createRoom('host-1', {
     topic: 'JS',
     timerSeconds: TIMER,
@@ -314,7 +323,15 @@ test('nextQuestion rejects non-hosts and calls outside a question', () => {
   manager.startGame('host-1')
 
   assert.throws(() => manager.nextQuestion('player-1'), /host/i)
+  // first skip — phase stays 'question' until the reveal passes; another call schedules another skip on the same question
   manager.nextQuestion('host-1')
+  manager.nextQuestion('host-1')
+  // advance the clock past both reveals and the question deadline (NOW + 15s)
+  currentTime = NOW + 4000
+  manager.processAdvances(currentTime)
+  currentTime = NOW + 20000
+  manager.processAdvances(currentTime)
+  // still in 'question' for the last index — but timer has now elapsed so a follow-up call advances immediately and finishes
   manager.nextQuestion('host-1')
   assert.throws(() => manager.nextQuestion('host-1'), /question/i)
 })
@@ -488,4 +505,206 @@ test('joinRoom rejects players beyond the participant cap', () => {
   manager.joinRoom('player-1', code, 'Ana')
   manager.joinRoom('player-2', code, 'Ben')
   assert.throws(() => manager.joinRoom('player-3', code, 'Cal'), /full/i)
+})
+
+test('all-answered broadcasts when the last player submits', () => {
+  const { manager, sends } = makeHarness()
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(1),
+  })
+  manager.joinRoom('player-1', code, 'Ana')
+  manager.joinRoom('player-2', code, 'Ben')
+  manager.startGame('host-1')
+
+  manager.submitAnswer('player-1', 'A')
+  assert.equal(
+    sentTo(sends, 'all').find((m) => m.type === 'all-answered'),
+    undefined,
+  )
+
+  manager.submitAnswer('player-2', 'C')
+  // at the moment all-answered fires, room.index is still 0 — but the
+  // scoreboard now includes the just-completed Q0 answers
+  assert.deepEqual(lastSentTo(sends, 'all'), {
+    type: 'all-answered',
+    correctAnswer: 'C',
+    scoreboard: [
+      { playerId: 'p-2', name: 'Ben', score: 10000, correct: 1 },
+      { playerId: 'p-1', name: 'Ana', score: 0, correct: 0 },
+    ],
+  })
+})
+
+test('nextQuestion delays 3s when host force-skips before everyone answered or timer expires', () => {
+  let currentTime = NOW
+  const { manager, sends } = makeHarness({ now: () => currentTime })
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  manager.joinRoom('player-1', code, 'Ana')
+  manager.startGame('host-1')
+
+  manager.nextQuestion('host-1')
+
+  // immediately after, the room is still in the question phase and the reveal was broadcast
+  const room = manager.rooms.get(code)
+  assert.equal(room.phase, 'question')
+  assert.equal(room.index, 0)
+  assert.deepEqual(lastSentTo(sends, 'all'), {
+    type: 'all-answered',
+    correctAnswer: 'C',
+    scoreboard: [{ playerId: 'p-1', name: 'Ana', score: 0, correct: 0 }],
+  })
+
+  // before 3s elapse, nothing advances
+  currentTime = NOW + 2000
+  manager.processAdvances(currentTime)
+  assert.equal(room.phase, 'question')
+  assert.equal(room.index, 0)
+
+  // once 3s elapse, the next question starts
+  currentTime = NOW + 3000
+  manager.processAdvances(currentTime)
+  assert.equal(room.phase, 'question')
+  assert.equal(room.index, 1)
+  const next = lastSentTo(sends, 'all')
+  assert.equal(next.type, 'question-started')
+  assert.equal(next.index, 1)
+  assert.equal(next.correctAnswer, 'C')
+})
+
+test('nextQuestion advances immediately when all players have answered', () => {
+  const { manager, sends } = makeHarness()
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  manager.joinRoom('player-1', code, 'Ana')
+  manager.joinRoom('player-2', code, 'Ben')
+  manager.startGame('host-1')
+  manager.submitAnswer('player-1', 'A')
+  manager.submitAnswer('player-2', 'C')
+
+  // all answered already triggered an all-answered broadcast; nextQuestion should not delay again
+  const beforeCount = sentTo(sends, 'all').filter((m) => m.type === 'question-started').length
+  manager.nextQuestion('host-1')
+  const afterCount = sentTo(sends, 'all').filter((m) => m.type === 'question-started').length
+  assert.equal(afterCount, beforeCount + 1)
+  const room = manager.rooms.get(code)
+  assert.equal(room.index, 1)
+  assert.equal(room.pendingAdvance, undefined)
+})
+
+test('nextQuestion advances immediately when timer already expired', () => {
+  let currentTime = NOW
+  const { manager } = makeHarness({ now: () => currentTime })
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  manager.joinRoom('player-1', code, 'Ana')
+  manager.startGame('host-1')
+
+  // jump past the timer — but the player did not answer
+  currentTime = NOW + TIMER * 1000 + 100
+  manager.nextQuestion('host-1')
+
+  const room = manager.rooms.get(code)
+  assert.equal(room.phase, 'question')
+  assert.equal(room.index, 1)
+  assert.equal(room.pendingAdvance, undefined)
+})
+
+test('sweep processes pending force-reveal advances alongside grace expiry', () => {
+  let currentTime = NOW
+  const { manager } = makeHarness({ now: () => currentTime })
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  manager.joinRoom('player-1', code, 'Ana')
+  manager.startGame('host-1')
+  manager.nextQuestion('host-1')
+  currentTime = NOW + 3000
+  manager.sweep(currentTime)
+  const room = manager.rooms.get(code)
+  assert.equal(room.index, 1)
+  assert.equal(room.pendingAdvance, null)
+})
+
+test('submitAnswer broadcasts answer-progress with current answered/total counts', () => {
+  const { manager, sends } = makeHarness()
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  manager.joinRoom('player-1', code, 'Ana')
+  manager.joinRoom('player-2', code, 'Ben')
+  manager.joinRoom('player-3', code, 'Cal')
+  manager.startGame('host-1')
+
+  manager.submitAnswer('player-1', 'A')
+  assert.deepEqual(sentTo(sends, 'players').at(-1), {
+    type: 'answer-progress',
+    answeredCount: 1,
+    totalPlayers: 3,
+  })
+  manager.submitAnswer('player-2', 'C')
+  assert.deepEqual(sentTo(sends, 'players').at(-1), {
+    type: 'answer-progress',
+    answeredCount: 2,
+    totalPlayers: 3,
+  })
+  // last submit triggers all-answered (broadcast to 'all'), so the 'players'
+  // channel sees one more progress with answeredCount=3
+  manager.submitAnswer('player-3', 'C')
+  assert.deepEqual(sentTo(sends, 'players').at(-1), {
+    type: 'answer-progress',
+    answeredCount: 3,
+    totalPlayers: 3,
+  })
+})
+
+test('scoreboard reflects cumulative scores through the just-finished question', () => {
+  const { manager, sends } = makeHarness()
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  manager.joinRoom('player-1', code, 'Ana')
+  manager.joinRoom('player-2', code, 'Ben')
+  manager.startGame('host-1')
+
+  // Q0: both correct; Ben answered slightly later? Let's pick distinct answers.
+  manager.submitAnswer('player-1', 'C')
+  manager.submitAnswer('player-2', 'C')
+
+  const allAnswered = lastSentTo(sends, 'all')
+  assert.equal(allAnswered.type, 'all-answered')
+  // Both answered correctly; Ana answered first so she should have higher score.
+  // Scores depend on timeLeftMs at submission — Ana submitted first → more time
+  // left at the moment of her answer. The test just asserts the shape (both 1
+  // correct, both non-zero, sorted by score desc with Ana first).
+  assert.equal(allAnswered.scoreboard[0].correct, 1)
+  assert.equal(allAnswered.scoreboard[1].correct, 1)
+  assert.equal(allAnswered.scoreboard[0].playerId, 'p-1')
+  assert.equal(allAnswered.scoreboard[1].playerId, 'p-2')
+  assert.ok(allAnswered.scoreboard[0].score > 0)
+  assert.ok(allAnswered.scoreboard[1].score > 0)
 })

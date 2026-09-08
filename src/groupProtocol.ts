@@ -12,6 +12,14 @@ export interface LeaderboardEntry {
   timeSpentMs: number
 }
 
+export interface ScoreboardEntry {
+  playerId: string
+  name: string
+  /** points stored as milli-points (÷1000 for display) */
+  score: number
+  correct: number
+}
+
 export type GroupServerMessage =
   | { type: 'room-created'; code: string }
   | { type: 'joined'; playerId: string; name: string; roomCode: string; players: PlayerInfo[] }
@@ -25,8 +33,11 @@ export type GroupServerMessage =
       timerSeconds: number
       deadline: number
       correctAnswer: string
+      scoreboard: ScoreboardEntry[]
     }
   | { type: 'answer-updated'; playerId: string; name: string; option: string; correct: boolean }
+  | { type: 'answer-progress'; answeredCount: number; totalPlayers: number }
+  | { type: 'all-answered'; correctAnswer: string; scoreboard: ScoreboardEntry[] }
   | { type: 'game-finished'; leaderboard: LeaderboardEntry[] }
   | { type: 'game-closed' }
   | { type: 'host-left' }

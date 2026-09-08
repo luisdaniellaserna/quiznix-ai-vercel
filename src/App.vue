@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import StartScreen from './components/StartScreen.vue'
-import { GoogleGenAI, Type } from '@google/genai'
 import QuizScreen from './components/QuizScreen.vue'
 import LoadingScreen from './components/LoadingScreen.vue'
 import OpenAI from 'openai'
@@ -15,22 +14,7 @@ import { computeScore } from './scoring'
 import { parseJsonResponse } from './jsonParse'
 import { useGroupStore } from './stores/groupStore'
 
-type ApiProvider = 'gemini' | 'deepseek'
-
-const apiProvider = (import.meta.env.VITE_AI_PROVIDER as ApiProvider) || 'gemini'
-
-let apiKey: string | undefined
-
-switch (apiProvider) {
-  case 'gemini':
-    apiKey = import.meta.env.VITE_GEMINI_API_KEY
-    break
-  case 'deepseek':
-    apiKey = import.meta.env.VITE_DEEPSEEK_API_KEY
-    break
-  default:
-    break
-}
+const apiKey = import.meta.env.VITE_DEEPSEEK_API_KEY
 
 const groupStore = useGroupStore()
 
@@ -43,10 +27,99 @@ const selectedMode = ref<Mode>('easy')
 const timedMode = ref(true)
 const returnFromQuiz = ref(false)
 
+// one room session per browser — used to surface the cross-tab takeover confirm
+interface BlockingSession {
+  tabId: string
+  code: string
+  role: 'host' | 'player'
+  playerName?: string
+  ageMs: number
+}
+const blockingSession = ref<BlockingSession | null>(null)
+const pendingGroupAction = ref<
+  | (() => void | Promise<void>)
+  | null
+>(null)
+
+function withRoomGuard(action: () => void | Promise<void>) {
+  const blocker = groupStore.getBlockingSession()
+  if (blocker) {
+    blockingSession.value = blocker
+    pendingGroupAction.value = action
+    return
+  }
+  void action()
+}
+
+async function confirmTakeover() {
+  const blocker = blockingSession.value
+  const action = pendingGroupAction.value
+  if (!blocker || !action) return
+  // evict the other tab first so its session releases the active-group slot,
+  // then run the queued action so the new claim sticks
+  groupStore.forceTakeover(blocker.tabId)
+  // give the other tab a beat to react (it clears localStorage on the storage event)
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  blockingSession.value = null
+  pendingGroupAction.value = null
+  await action()
+}
+
+function cancelTakeover() {
+  blockingSession.value = null
+  pendingGroupAction.value = null
+}
+
+const takeoverDialogRef = ref<HTMLDialogElement | null>(null)
+const evictedDialogRef = ref<HTMLDialogElement | null>(null)
+
+watch(
+  () => blockingSession.value,
+  (b) => {
+    void nextTick(() => {
+      if (b) {
+        if (!takeoverDialogRef.value?.open) takeoverDialogRef.value?.showModal()
+      } else {
+        takeoverDialogRef.value?.close()
+      }
+    })
+  },
+)
+
+watch(
+  () => groupStore.evictedMessage,
+  (msg) => {
+    void nextTick(() => {
+      if (msg) {
+        if (!evictedDialogRef.value?.open) evictedDialogRef.value?.showModal()
+      } else {
+        evictedDialogRef.value?.close()
+      }
+    })
+  },
+)
+
+function dismissEvicted() {
+  evictedDialogRef.value?.close()
+  groupStore.leave()
+  status.value = 'start'
+}
+
+function onGroupPlayerConflict(payload: {
+  blocker: { tabId: string; code: string; role: 'host' | 'player'; playerName?: string; ageMs: number }
+  code: string
+  name: string
+}) {
+  blockingSession.value = payload.blocker
+  pendingGroupAction.value = () => {
+    groupStore.joinRoom(payload.code, payload.name)
+  }
+}
+
 // a join link like ?room=ABC123 drops players straight into the group join flow
 const urlParams = new URLSearchParams(window.location.search)
 if (urlParams.has('room')) {
-  groupStore.prepareJoin()
+  withRoomGuard(() => groupStore.prepareJoin())
   status.value = 'group'
 }
 
@@ -60,72 +133,35 @@ function parseAndValidate(raw: string): Questions {
   return parsed
 }
 
-async function geminiMain(
-  topics: string[],
-  mode: Mode,
-  count: number,
-  sessionId: string,
+function dedupeByQuestion(existing: QuestionFormat[], candidate: QuestionFormat): boolean {
+  const text = candidate.question.trim().toLowerCase()
+  if (!text) return false
+  return existing.some((q) => q.question.trim().toLowerCase() === text)
+}
+
+// The model sometimes returns fewer questions than requested (often after a topic/difficulty
+// change). Retry once with a focused follow-up that asks only for the missing count, citing
+// the questions already generated so it doesn't repeat them. If still short, throw — better
+// to fail than to ship a quiz with 3 of 5 questions.
+async function ensureQuestionCount(
+  initial: Questions,
+  requested: number,
+  fetchMore: (missing: number) => Promise<QuestionFormat[]>,
 ): Promise<Questions> {
-  const ai = new GoogleGenAI({ apiKey })
-
-  const config = {
-    responseMimeType: 'application/json',
-    responseSchema: {
-      type: Type.OBJECT,
-      properties: {
-        response_code: {
-          type: Type.NUMBER,
-        },
-        results: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              type: {
-                type: Type.STRING,
-              },
-              difficulty: {
-                type: Type.STRING,
-              },
-              category: {
-                type: Type.STRING,
-              },
-              question: {
-                type: Type.STRING,
-              },
-              correct_answer: {
-                type: Type.STRING,
-              },
-              incorrect_answers: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.STRING,
-                },
-              },
-            },
-            propertyOrdering: [
-              'type',
-              'difficulty',
-              'category',
-              'question',
-              'correct_answer',
-              'incorrect_answers',
-            ],
-          },
-        },
-      },
-      propertyOrdering: ['response_code', 'results'],
-    },
+  const existing = [...initial.results]
+  if (existing.length >= requested) {
+    return { ...initial, results: existing.slice(0, requested) }
   }
-
-  const contents = buildQuizPrompt(topics, mode, count, sessionId)
-
-  const response = await ai.models.generateContent({
-    model: 'gemini-3.6-flash',
-    contents,
-    config,
-  })
-  return parseAndValidate(response.text ?? '')
+  const missing = requested - existing.length
+  const extra = await fetchMore(missing)
+  const filtered = extra.filter((q) => !dedupeByQuestion(existing, q))
+  const merged = [...existing, ...filtered]
+  if (merged.length < requested) {
+    throw new Error(
+      `Only ${merged.length} of ${requested} questions were generated. Please try again.`,
+    )
+  }
+  return { ...initial, results: merged.slice(0, requested) }
 }
 
 async function deepseekMain(
@@ -133,6 +169,7 @@ async function deepseekMain(
   mode: Mode,
   count: number,
   sessionId: string,
+  existing: QuestionFormat[] = [],
 ): Promise<Questions> {
   const openai = new OpenAI({
     baseURL: 'https://api.deepseek.com',
@@ -164,7 +201,13 @@ async function deepseekMain(
     {"response_code":0,"results":[{"type":"multiple","difficulty":"easy","category":"General Knowledge","question":"What did a man in 2011 successfully register as a religion in New Zealand?","correct_answer":"Church of the Flying Spaghetti Monster","incorrect_answers":["Jediism","Pastafarianism","Dudeism"]}]}
   `
 
-  const userPrompt = buildQuizPrompt(topics, mode, count, sessionId)
+  const basePrompt = buildQuizPrompt(topics, mode, count, sessionId)
+  const userPrompt =
+    existing.length > 0
+      ? `${basePrompt}\n\nThese ${existing.length} questions were already generated for this quiz and must NOT be repeated:\n${existing
+          .map((q, i) => `${i + 1}. ${q.question}`)
+          .join('\n')}\n\nGenerate exactly ${count} new, distinct questions that fit the same topics and difficulty.`
+      : basePrompt
 
   const completion = await openai.chat.completions.create({
     messages: [
@@ -179,19 +222,30 @@ async function deepseekMain(
 
   const response = completion.choices[0].message.content
 
-  console.log(response)
   return parseAndValidate(response ?? '')
 }
 
-function generateQuestions(
+async function deepseekFetchMore(
+  topics: string[],
+  mode: Mode,
+  missing: number,
+  sessionId: string,
+  existing: QuestionFormat[],
+): Promise<QuestionFormat[]> {
+  const result = await deepseekMain(topics, mode, missing, sessionId, existing)
+  return result.results
+}
+
+async function generateQuestions(
   topics: string[],
   mode: Mode,
   count: number,
   sessionId: string,
 ): Promise<Questions> {
-  return apiProvider === 'deepseek'
-    ? deepseekMain(topics, mode, count, sessionId)
-    : geminiMain(topics, mode, count, sessionId)
+  const initial = await deepseekMain(topics, mode, count, sessionId)
+  const fetchMore = (missing: number) =>
+    deepseekFetchMore(topics, mode, missing, sessionId, initial.results)
+  return ensureQuestionCount(initial, count, fetchMore)
 }
 
 // guarantee a randomized question order regardless of the AI's output ordering
@@ -219,6 +273,30 @@ async function startQuiz(payload: {
   selectedMode.value = payload.mode
   timedMode.value = payload.timed
 
+  // guard the group-mode entry — if another tab is in a room, prompt the user first
+  if (payload.gameMode === 'group') {
+    const blocker = groupStore.getBlockingSession()
+    if (blocker) {
+      status.value = 'start'
+      blockingSession.value = blocker
+      pendingGroupAction.value = () => proceedWithGroupStart(payload)
+      return
+    }
+  }
+
+  await proceedWithGroupStart(payload)
+}
+
+async function proceedWithGroupStart(payload: {
+  topics: string[]
+  mode: Mode
+  itemCount: number
+  gameMode: GameMode
+  timed: boolean
+  maxPlayers?: number
+  timePerQuestion?: number
+}) {
+  status.value = 'loading'
   try {
     const sessionId = crypto.randomUUID()
     const generated = await generateQuestions(
@@ -250,6 +328,8 @@ async function startQuiz(payload: {
           : 'Something went wrong! Please try again.'
     status.value = 'start'
     isError.value = true
+    pendingGroupAction.value = null
+    blockingSession.value = null
   }
 }
 
@@ -262,6 +342,15 @@ function removeLastAnswer() {
 }
 
 function joinGroup(payload: { code: string; name: string }) {
+  const blocker = groupStore.getBlockingSession()
+  if (blocker) {
+    blockingSession.value = blocker
+    pendingGroupAction.value = () => {
+      groupStore.joinRoom(payload.code, payload.name)
+      status.value = 'group'
+    }
+    return
+  }
   groupStore.joinRoom(payload.code, payload.name)
   status.value = 'group'
 }
@@ -292,6 +381,7 @@ function reset() {
     <GroupPlayer
       v-else-if="status === 'group' && groupStore.role === 'player'"
       @leave="leaveGroup"
+      @room-conflict="onGroupPlayerConflict"
     />
 
     <template v-else>
@@ -322,7 +412,7 @@ function reset() {
           :score="score"
           :total="userAnswers.length"
         />
-        <div v-else class="alert alert-warning mt-4">No API keys!</div>
+        <div v-else class="alert alert-warning mt-4">No DeepSeek API key! Set VITE_DEEPSEEK_API_KEY in .env.</div>
       </main>
     </template>
 
@@ -344,5 +434,46 @@ function reset() {
         <span>{{ errorMessage }}</span>
       </div>
     </div>
+
+    <!-- cross-tab single-room guard: another live tab is already in a room -->
+    <dialog ref="takeoverDialogRef" class="modal">
+      <div class="modal-box">
+        <h3 class="text-lg font-bold">You already have an active room</h3>
+        <p class="py-3 text-sm opacity-80">
+          This browser is in
+          <strong class="font-bold">Room {{ blockingSession?.code || 'PENDING' }}</strong>
+          <span v-if="blockingSession?.role">
+            as <span class="badge badge-sm badge-secondary align-middle">{{ blockingSession.role }}</span>
+          </span>
+          in another tab. Only one room session per browser is allowed so questions,
+          timers, and scores stay in sync.
+        </p>
+        <p class="py-1 text-sm opacity-70">
+          Leave the other room to continue here. The other tab will be closed out and you'll
+          take its place.
+        </p>
+        <div class="modal-action">
+          <button class="btn btn-ghost" @click="cancelTakeover">Stay in other room</button>
+          <button class="btn btn-primary" @click="confirmTakeover">Leave other &amp; continue</button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+      </form>
+    </dialog>
+
+    <!-- surfaced when another tab forcefully took over this tab's session -->
+    <dialog ref="evictedDialogRef" class="modal">
+      <div class="modal-box">
+        <h3 class="text-lg font-bold">Switched rooms</h3>
+        <p class="py-3 text-sm opacity-80">{{ groupStore.evictedMessage || 'Another tab took over this session.' }}</p>
+        <div class="modal-action">
+          <button class="btn btn-primary" @click="dismissEvicted">Back to home</button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+      </form>
+    </dialog>
   </div>
 </template>

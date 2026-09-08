@@ -9,7 +9,7 @@ Built with Vue 3, Vite, Tailwind CSS 4, daisyUI 5, and TypeScript.
 ## Features
 
 - **AI question generation** — quizzes are generated per request from one or
-  multiple topics (mix and shuffled), using Gemini or DeepSeek as the LLM backend.
+  multiple topics (mix and shuffled), using DeepSeek as the LLM backend.
 - **Solo mode** — pick difficulty and question count, play timed or untimed,
   go back to review earlier questions, and finish with a results summary.
 - **Group mode** — host a room and friends join from their own devices with a
@@ -27,7 +27,7 @@ Built with Vue 3, Vite, Tailwind CSS 4, daisyUI 5, and TypeScript.
 | ------------ | ------------------------------------------------------------------ |
 | Frontend     | Vue 3 (`<script setup>`), Pinia, Vite, Tailwind CSS 4, daisyUI 5   |
 | Language     | TypeScript (strict)                                                 |
-| AI providers | Google GenAI (Gemini) or DeepSeek chat completions (via `openai`)  |
+| AI provider  | DeepSeek chat completions (via `openai`)                          |
 | Realtime     | Node room server using the `ws` package (no framework)             |
 | Testing      | Node's built-in `node:test` for the room server logic              |
 
@@ -35,7 +35,7 @@ Built with Vue 3, Vite, Tailwind CSS 4, daisyUI 5, and TypeScript.
 
 ```
 Browser (Vue 3 SPA)
-├── Solo quiz ────► AI provider (Gemini/DeepSeek) ────► questions ──► quiz UI
+├── Solo quiz ────► AI provider (DeepSeek) ────► questions ──► quiz UI
 └── Group mode ───► WebSocket room server (ws://<host>:8787)
                       ├─ host creates room, players join by code
                       └─ server owns game state: timers, live answers, scoring
@@ -73,9 +73,9 @@ Requirements: Node.js 20.19+ (or 22.12+).
 ```sh
 npm install
 
-# configure keys (at least one AI provider)
+# configure the AI key
 cp .env.example .env
-# edit .env: VITE_GEMINI_API_KEY and/or VITE_DEEPSEEK_API_KEY, VITE_AI_PROVIDER
+# edit .env: VITE_DEEPSEEK_API_KEY
 
 npm run dev
 ```
@@ -88,13 +88,11 @@ work out of the box.
 
 `VITE_*` variables live in `.env` (committed example: `.env.example`).
 
-| Variable              | Purpose                                                          |
-| --------------------- | ---------------------------------------------------------------- |
-| `VITE_GEMINI_API_KEY` | Gemini API key (used when `VITE_AI_PROVIDER="gemini"`).          |
-| `VITE_DEEPSEEK_API_KEY` | DeepSeek API key (used when `VITE_AI_PROVIDER="deepseek"`).    |
-| `VITE_AI_PROVIDER`    | `"gemini"` (default) or `"deepseek"`.                            |
-| `VITE_WS_URL`         | Room server WebSocket URL; defaults to `ws://<page-host>:8787` (`wss://` when page is `https:`). For production (e.g. Vercel at `https://quiznix.vercel.app`) you **must** host the `server/` separately (Render/Fly/Railway with TLS) and set `VITE_WS_URL=wss://<your-ws-host>` — Vercel's static hosting cannot run the persistent `ws` server. |
-| `VITE_REPORT_EMAIL`   | Recipient of the in-app bug report email; unaddressed when empty.|
+| Variable                | Purpose                                                          |
+| ----------------------- | ---------------------------------------------------------------- |
+| `VITE_DEEPSEEK_API_KEY` | DeepSeek API key.                                                |
+| `VITE_WS_URL`           | Room server WebSocket URL; defaults to `ws://<page-host>:8787` (`wss://` when page is `https:`). For production (e.g. Vercel at `https://quiznix.vercel.app`) you **must** host the `server/` separately (Render/Fly/Railway with TLS) and set `VITE_WS_URL=wss://<your-ws-host>` — Vercel's static hosting cannot run the persistent `ws` server. |
+| `VITE_REPORT_EMAIL`     | Recipient of the in-app bug report email; unaddressed when empty. |
 
 ## How the modes work
 

@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(npx vite build --mode production 2 >& 1)",
+      "Shell(npx vite build 2 >& 1)",
+      "Shell(npx eslint src/components/QuizScreen.vue src/components/SettingsMenu.vue src/App.vue 2 >& 1)",
+      "Shell(npx eslint src/components/StartScreen.vue 2 >& 1)",
+      "Shell(git:*)",
+      "Shell(cd /d C:\\Users\\luisdaniel.laserna\\Repos\\quizly-ai-vercel && git commit -F - <<'EOF' FEAT: move Quit to SettingsMenu and fix responsive layouts - Move Quit button from QuizScreen into SettingsMenu dropdown, shown only on the quiz page - Group Back + Next buttons on the right side of the exam footer - Stack form fields vertically on small screens in the solo quiz setup (topic input + Add, difficulty + items, timer toggle) Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)",
+      "Shell(npx vue-tsc --noEmit 2 >& 1)",
+      "Shell(cd /d C:\\Users\\luisdaniel.laserna\\Repos\\quizly-ai-vercel && ls node_modules/.tmp/ 2>&1; ls .vue-tsc/ 2>&1)",
+      "Shell(npx vue-tsc --build --force 2 >& 1)",
+      "Shell(npm:*)",
+      "Shell(git commit -F - <<'EOF' FIX: isolate each quiz request as a new AI session Generate a unique session id per startQuiz call and thread it through the user prompt plus an explicit anti-leak instruction, so each new game/topics is treated as an independent conversation by the LLM. Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)",
+      "Shell(node --test \"server/roomManager.test.mjs\")",
+      "Shell(node --test server/roomManager.test.mjs 2 >& 1)",
+      "Shell(Select-Object:*)",
+      "Shell(findstr:*)",
+      "Shell(dir:*)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}

@@ -22,7 +22,6 @@
     "format": "prettier --write src/ server/"
   },
   "dependencies": {
-    "@google/genai": "^1.21.0",
     "@iconify-json/lucide": "^1.2.128",
     "@iconify/vue": "^5.0.1",
     "openai": "^5.23.1",
@@ -51,6 +50,6 @@
     "typescript": "~5.8.0",
     "vite": "npm:rolldown-vite@latest",
     "vite-plugin-vue-devtools": "^8.0.0",
-    "vue-tsc": "^3.0.4"
+    "vue-tsc": "^3.3.11"
   }
 }

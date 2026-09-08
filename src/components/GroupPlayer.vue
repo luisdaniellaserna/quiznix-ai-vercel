@@ -4,7 +4,16 @@ import { useGroupStore } from '../stores/groupStore'
 import { useCountdown } from '../composables/useCountdown'
 import SettingsMenu from './SettingsMenu.vue'
 
-const emit = defineEmits<{ leave: [] }>()
+const emit = defineEmits<{
+  leave: []
+  'room-conflict': [
+    payload: {
+      blocker: { tabId: string; code: string; role: 'host' | 'player'; playerName?: string; ageMs: number }
+      code: string
+      name: string
+    },
+  ]
+}>()
 
 const store = useGroupStore()
 const countdown = useCountdown(() => store.deadline)
@@ -36,15 +45,48 @@ function join() {
   if (!canJoin.value) {
     return
   }
+  // if the user is changing to a different room than the one this tab already
+  // claims, surface the cross-tab conflict modal in App.vue via the request event
+  const blocker = store.checkRoomConflict()
+  const targetCode = joinCode.value.trim().toUpperCase()
+  if (blocker && blocker.code !== targetCode) {
+    emit('room-conflict', { blocker, code: targetCode, name: playerName.value.trim() })
+    return
+  }
   joining.value = true
-  store.joinRoom(joinCode.value, playerName.value.trim())
+  store.joinRoom(targetCode, playerName.value.trim())
 }
 
 const shuffledOptions = computed(() => [...store.options].sort(() => Math.random() - 0.5))
 
 const selectedOption = ref<string | null>(null)
 const hasSubmitted = computed(() => store.myAnswer !== null)
-const isRevealed = computed(() => hasSubmitted.value || countdown.expired.value)
+// Correct answer only shows when the whole cohort has answered, the timer ran out,
+// or the host force-skipped (server emits all-answered with the correct answer first).
+const isRevealed = computed(() => store.allAnswered || countdown.expired.value)
+
+// Sidebar stats — derive from store so they refresh automatically as messages arrive.
+const totalRoster = computed(() => store.players.length)
+const answeredDisplay = computed(() =>
+  store.answeredCount > 0 ? store.answeredCount : hasSubmitted.value ? 1 : 0,
+)
+const totalDisplay = computed(() =>
+  store.totalPlayers > 0 ? store.totalPlayers : totalRoster.value,
+)
+
+const ORDINAL_SUFFIX = ['th', 'st', 'nd', 'rd']
+function ordinal(rank: number): string {
+  const mod100 = rank % 100
+  if (mod100 >= 11 && mod100 <= 13) return `${rank}th`
+  const mod10 = rank % 10
+  return `${rank}${ORDINAL_SUFFIX[mod10] ?? 'th'}`
+}
+const rankLabel = computed(() => ordinal(store.myRank))
+const myScoreLine = computed(() => {
+  const me = store.scoreboard.find((e) => e.playerId === store.playerId)
+  if (!me) return ''
+  return `${(me.score / 1000).toFixed(1)} pts · ${me.correct} correct so far`
+})
 
 function formatTime(ms: number) {
   const seconds = Math.round(ms / 1000)
@@ -130,7 +172,7 @@ function done() {
       </div>
     </header>
 
-    <main class="mx-auto w-full max-w-3xl p-4">
+    <main class="mx-auto w-full max-w-5xl p-4">
       <!-- closed by the host or a lost connection — also shown as modal -->
       <div v-if="store.phase === 'closed'" class="card mt-4 shadow-xl">
         <div class="card-body items-center text-center">
@@ -253,70 +295,135 @@ function done() {
       </div>
 
       <!-- answering a question -->
-      <div v-else-if="store.phase === 'question'" class="card mt-4 shadow-xl">
-        <div class="card-body gap-4">
-          <div class="flex items-center justify-between">
-            <span class="font-bold">Question {{ store.currentIndex + 1 }} / {{ store.total }}</span>
-            <span
-              class="badge badge-lg"
-              :class="countdown.expired.value ? 'badge-error' : 'badge-primary'"
-            >
-              {{ countdown.expired.value ? 'time up' : `${countdown.remaining.value}s` }}
-            </span>
-          </div>
-          <progress
-            class="progress progress-primary"
-            :value="store.currentIndex + 1"
-            :max="store.total"
-          />
-          <h2 class="break-words text-xl font-bold sm:text-2xl">{{ store.question }}</h2>
-          <div class="grid gap-3">
+      <div v-else-if="store.phase === 'question'" class="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start">
+        <div class="card flex-1 shadow-xl">
+          <div class="card-body gap-4">
+            <div class="flex items-center justify-between">
+              <span class="font-bold">Question {{ store.currentIndex + 1 }} / {{ store.total }}</span>
+              <span
+                class="badge badge-lg"
+                :class="countdown.expired.value ? 'badge-error' : 'badge-primary'"
+              >
+                {{ countdown.expired.value ? 'time up' : `${countdown.remaining.value}s` }}
+              </span>
+            </div>
+            <progress
+              class="progress progress-primary"
+              :value="store.currentIndex + 1"
+              :max="store.total"
+            />
+            <h2 class="break-words text-xl font-bold sm:text-2xl">{{ store.question }}</h2>
+            <div class="grid gap-3">
+              <button
+                v-for="option in shuffledOptions"
+                :key="option"
+                class="btn btn-lg h-auto min-h-12 justify-start whitespace-normal break-words py-3 text-left rounded-xl"
+                :class="{
+                  'btn-success': isRevealed && option === store.correctAnswer,
+                  'btn-error': isRevealed && option === store.myAnswer && option !== store.correctAnswer,
+                  'btn-primary': !isRevealed && (selectedOption === option || store.myAnswer === option),
+                  'btn-outline': !isRevealed && selectedOption !== option && store.myAnswer !== option,
+                  'opacity-60': isRevealed && option !== store.correctAnswer && option !== store.myAnswer,
+                }"
+                :disabled="countdown.expired.value || hasSubmitted"
+                @click="selectOption(option)"
+              >
+                {{ option }}
+              </button>
+            </div>
             <button
-              v-for="option in shuffledOptions"
-              :key="option"
-              class="btn btn-lg h-auto min-h-12 justify-start whitespace-normal break-words py-3 text-left rounded-xl"
-              :class="{
-                'btn-success': isRevealed && option === store.correctAnswer,
-                'btn-error': isRevealed && option === store.myAnswer && option !== store.correctAnswer,
-                'btn-primary': !isRevealed && (selectedOption === option || store.myAnswer === option),
-                'btn-outline': !isRevealed && selectedOption !== option && store.myAnswer !== option,
-                'opacity-60': isRevealed && option !== store.correctAnswer && option !== store.myAnswer,
-              }"
-              :disabled="countdown.expired.value || hasSubmitted"
-              @click="selectOption(option)"
+              class="btn btn-primary btn-lg w-full"
+              :disabled="!selectedOption || hasSubmitted || countdown.expired.value"
+              @click="submitAnswer"
             >
-              {{ option }}
+              {{ hasSubmitted ? 'Submitted ✓' : countdown.expired.value ? 'Time up' : 'Submit answer' }}
             </button>
-          </div>
-          <button
-            class="btn btn-primary btn-lg w-full"
-            :disabled="!selectedOption || hasSubmitted || countdown.expired.value"
-            @click="submitAnswer"
-          >
-            {{ hasSubmitted ? 'Submitted ✓' : countdown.expired.value ? 'Time up' : 'Submit answer' }}
-          </button>
 
-          <!-- highlight correct answer immediately after submit (and on time up) -->
-          <div v-if="isRevealed && store.correctAnswer" class="alert justify-center gap-2" :class="store.myAnswer === store.correctAnswer ? 'alert-success' : 'alert-error'">
-            <span v-if="store.myAnswer === store.correctAnswer">Correct! Answer: <strong>{{ store.correctAnswer }}</strong></span>
-            <span v-else>Correct answer: <strong>{{ store.correctAnswer }}</strong></span>
-            <span class="text-xs opacity-70">{{ countdown.expired.value ? 'Next in a few seconds…' : 'Waiting for others…' }}</span>
-          </div>
+            <!-- reveal is gated on all-answered / timer expired / host force-skip -->
+            <div v-if="isRevealed && store.correctAnswer" class="alert justify-center gap-2" :class="store.myAnswer === store.correctAnswer ? 'alert-success' : 'alert-error'">
+              <span v-if="store.myAnswer === store.correctAnswer">Correct! Answer: <strong>{{ store.correctAnswer }}</strong></span>
+              <span v-else-if="hasSubmitted">Not quite. Correct answer: <strong>{{ store.correctAnswer }}</strong></span>
+              <span v-else>Correct answer: <strong>{{ store.correctAnswer }}</strong></span>
+              <span class="text-xs opacity-70">
+                {{
+                  countdown.expired.value
+                    ? 'Time is up — next in a few seconds…'
+                    : store.allAnswered
+                      ? 'All answers in — next question in a moment…'
+                      : 'Waiting for others…'
+                }}
+              </span>
+            </div>
 
-          <p class="text-center text-sm opacity-70">
-            {{
-              countdown.expired.value
-                ? hasSubmitted
-                  ? 'Time is up! Answer locked.'
-                  : 'Time is up — no answer.'
-                : hasSubmitted
-                  ? 'Answer submitted and locked. Waiting for others…'
-                  : selectedOption
-                    ? 'Tap Submit to lock your answer.'
-                    : 'Select an answer, then tap Submit to lock it.'
-            }}
-          </p>
+            <p class="text-center text-sm opacity-70">
+              {{
+                countdown.expired.value
+                  ? hasSubmitted
+                    ? 'Time is up! Answer locked.'
+                    : 'Time is up — no answer.'
+                  : hasSubmitted
+                    ? store.allAnswered
+                      ? 'All answered — revealing correct answer.'
+                      : 'Answer submitted and locked. Waiting for others…'
+                    : selectedOption
+                      ? 'Tap Submit to lock your answer.'
+                      : 'Select an answer, then tap Submit to lock it.'
+              }}
+            </p>
+          </div>
         </div>
+
+        <!-- live progress sidebar -->
+        <aside class="flex w-full flex-col gap-3 lg:sticky lg:top-4 lg:w-64 lg:shrink-0">
+          <div class="card shadow-xl">
+            <div class="card-body gap-1 p-4">
+              <p class="text-xs font-semibold uppercase tracking-wider opacity-60">
+                Answered
+              </p>
+              <p class="text-2xl font-black">
+                {{ answeredDisplay }}<span class="opacity-50">/{{ totalDisplay }}</span>
+              </p>
+              <progress
+                class="progress progress-primary mt-1 h-2"
+                :value="answeredDisplay"
+                :max="totalDisplay || 1"
+              />
+              <p class="text-xs opacity-70">
+                {{
+                  store.allAnswered
+                    ? 'Everyone has answered!'
+                    : countdown.expired.value
+                      ? 'Time is up — locking in…'
+                      : 'Live count of players who locked in.'
+                }}
+              </p>
+            </div>
+          </div>
+
+          <div class="card shadow-xl">
+            <div class="card-body gap-1 p-4">
+              <p class="text-xs font-semibold uppercase tracking-wider opacity-60">
+                Current rank
+              </p>
+              <p class="text-2xl font-black">
+                <template v-if="store.myRank > 0">
+                  <span class="text-primary">{{ rankLabel }}</span><span class="opacity-50">/{{ totalRoster }}</span>
+                </template>
+                <template v-else>
+                  <span class="opacity-50">—</span>
+                </template>
+              </p>
+              <p class="text-xs opacity-70">
+                <template v-if="store.myRank > 0">
+                  {{ myScoreLine }}
+                </template>
+                <template v-else>
+                  Ranking will appear after the first question.
+                </template>
+              </p>
+            </div>
+          </div>
+        </aside>
       </div>
     </main>
 
