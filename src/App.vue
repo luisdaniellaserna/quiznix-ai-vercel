@@ -259,7 +259,7 @@ async function deepseekMain(
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ],
-    model: 'deepseek-chat',
+    model: 'deepseek-v4-flash',
     temperature: 1.1,
     presence_penalty: 0.6,
     frequency_penalty: 0.4,
