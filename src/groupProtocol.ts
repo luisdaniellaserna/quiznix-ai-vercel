@@ -49,7 +49,6 @@ export type GroupServerMessage =
   | { type: 'answer-progress'; answeredCount: number; totalPlayers: number }
   | { type: 'all-answered'; correctAnswer: string; scoreboard: ScoreboardEntry[] }
   | { type: 'game-finished'; leaderboard: LeaderboardEntry[] }
-  | { type: 'room-resetting'; leaderboard: LeaderboardEntry[]; topic: string }
   | { type: 'room-to-lobby'; players: PlayerInfo[]; topic: string }
   | ({ type: 'chat-received' } & ChatMessage)
   | { type: 'game-closed' }
@@ -71,17 +70,9 @@ export type GroupClientMessage =
   | { type: 'answer'; option: string }
   | { type: 'chat'; id: string; text: string }
   | { type: 'next-question' }
-  | { type: 'restart-room' }
   | { type: 'back-to-lobby' }
   | {
       type: 'update-room-quiz'
-      topic: string
-      timerSeconds: number
-      maxPlayers: number
-      questions: QuestionFormat[]
-    }
-  | {
-      type: 'start-next-game'
       topic: string
       timerSeconds: number
       maxPlayers: number

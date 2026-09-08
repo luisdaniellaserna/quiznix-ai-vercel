@@ -17,7 +17,7 @@ import {
 } from './groupTabSync'
 
 export type GroupRole = 'none' | 'host' | 'player'
-export type GroupPhase = 'idle' | 'connecting' | 'lobby' | 'question' | 'finished' | 'closed' | 'between-rounds'
+export type GroupPhase = 'idle' | 'connecting' | 'lobby' | 'question' | 'finished' | 'closed'
 
 /** The WebSocket URL of the room server, as configured or derived from the page host. */
 export function roomServerUrl() {
@@ -68,10 +68,6 @@ export const useGroupStore = defineStore('group', () => {
   // Lobby group chat. The server only relays messages — every client keeps its
   // own copy in localStorage so a refresh restores the visible history.
   const chatMessages = ref<ChatMessage[]>([])
-  // Final leaderboard from the most recent finished round, kept so the host's
-  // "Play again" transition (and the player's waiting card) can show the
-  // previous results even after the room has moved into 'between-rounds'.
-  const lastFinalLeaderboard = ref<LeaderboardEntry[] | null>(null)
   const closedMessage = ref('')
   const error = ref('')
   const evictedMessage = ref('')
@@ -318,26 +314,7 @@ export const useGroupStore = defineStore('group', () => {
         break
       case 'game-finished':
         leaderboard.value = message.leaderboard
-        lastFinalLeaderboard.value = message.leaderboard
         phase.value = 'finished'
-        break
-      case 'room-resetting':
-        // host kicked off a new round — keep last results visible, clear per-round state
-        lastFinalLeaderboard.value = message.leaderboard
-        topic.value = message.topic
-        leaderboard.value = null
-        scoreboard.value = []
-        answeredCount.value = 0
-        totalPlayers.value = 0
-        liveAnswers.value = {}
-        currentIndex.value = 0
-        total.value = 0
-        question.value = ''
-        options.value = []
-        correctAnswer.value = ''
-        allAnswered.value = false
-        myAnswer.value = null
-        phase.value = 'between-rounds'
         break
       case 'room-to-lobby':
         // host took the room back to the lobby — same room code and roster,
@@ -399,7 +376,6 @@ export const useGroupStore = defineStore('group', () => {
     answeredCount.value = 0
     totalPlayers.value = 0
     leaderboard.value = null
-    lastFinalLeaderboard.value = null
     chatMessages.value = []
     closedMessage.value = ''
     error.value = ''
@@ -510,16 +486,18 @@ export const useGroupStore = defineStore('group', () => {
     send({ type: 'next-question' })
   }
 
-  /** Host kicks off a new round from the leaderboard. Players stay in the
-   * room and see a "waiting for host" card until the host picks new topics. */
-  function restartRoom() {
-    send({ type: 'restart-room' })
-  }
-
   /** Host returns a finished room to the lobby. Same room code and roster, so
    * new players can join and the host can rematch with the same questions. */
   function backToLobby() {
     send({ type: 'back-to-lobby' })
+  }
+
+  /** Player goes back to the lobby view after a finished game without leaving
+   * the room. View-only: the server roster is untouched, so later broadcasts
+   * (lobby updates, close) keep working and a refresh resyncs server truth. */
+  function returnToLobby() {
+    if (phase.value !== 'finished') return
+    phase.value = 'lobby'
   }
 
   /** Host replaces the lobby room's quiz content after changing the setup.
@@ -532,22 +510,6 @@ export const useGroupStore = defineStore('group', () => {
   }) {
     send({
       type: 'update-room-quiz',
-      topic: settings.topic,
-      timerSeconds: settings.timerSeconds,
-      maxPlayers: settings.maxPlayers,
-      questions: settings.questions,
-    })
-  }
-
-  /** Host commits the new round's topics and questions after restartRoom. */
-  function startNextGame(settings: {
-    topic: string
-    timerSeconds: number
-    maxPlayers: number
-    questions: QuestionFormat[]
-  }) {
-    send({
-      type: 'start-next-game',
       topic: settings.topic,
       timerSeconds: settings.timerSeconds,
       maxPlayers: settings.maxPlayers,
@@ -645,7 +607,6 @@ export const useGroupStore = defineStore('group', () => {
     sendChat,
     myRank,
     leaderboard,
-    lastFinalLeaderboard,
     closedMessage,
     error,
     evictedMessage,
@@ -658,10 +619,9 @@ export const useGroupStore = defineStore('group', () => {
     startGame,
     submitAnswer,
     nextQuestion,
-    restartRoom,
     backToLobby,
+    returnToLobby,
     updateRoomQuiz,
-    startNextGame,
     closeRoom,
     leave,
   }

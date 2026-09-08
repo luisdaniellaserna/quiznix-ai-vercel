@@ -164,6 +164,17 @@ function done() {
   store.leave()
   emit('leave')
 }
+
+const exitDialogRef = ref<HTMLDialogElement | null>(null)
+
+function requestLeave() {
+  exitDialogRef.value?.showModal()
+}
+
+function confirmLeave() {
+  exitDialogRef.value?.close()
+  done()
+}
 </script>
 
 <template>
@@ -207,45 +218,12 @@ function done() {
           <h2 class="text-center text-2xl font-black">🏆 Final scores</h2>
           <p class="text-center font-medium opacity-70">{{ store.topic }}</p>
           <FinalLeaderboard :entries="store.leaderboard ?? []" :highlight-name="store.playerName" />
-          <button class="btn btn-primary mt-4" @click="done">Done</button>
-        </div>
-      </div>
-
-      <!-- host hit "Play again" — last results stay visible while the host
-           picks a new round. Players can wait or quit. -->
-      <div v-else-if="store.phase === 'between-rounds'" class="card mt-4 shadow-xl">
-        <div class="card-body items-center gap-3 text-center">
-          <span class="loading loading-spinner loading-lg text-primary"></span>
-          <h2 class="text-xl font-bold">Waiting for host…</h2>
-          <p class="text-sm opacity-70">
-            The host is choosing a new game. You'll jump back in automatically once they start.
-          </p>
-          <p v-if="store.topic" class="text-xs opacity-60">Last round: {{ store.topic }}</p>
-          <div v-if="store.lastFinalLeaderboard?.length" class="mt-2 w-full">
-            <p class="mb-2 text-xs font-semibold uppercase tracking-wider opacity-60">Last round</p>
-            <ul class="grid gap-1">
-              <li
-                v-for="(entry, index) in store.lastFinalLeaderboard"
-                :key="entry.name + index"
-                class="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm"
-                :class="
-                  entry.name === store.playerName
-                    ? 'border-primary bg-primary/5'
-                    : 'border-base-300'
-                "
-              >
-                <span class="font-bold opacity-70">{{ index + 1 }}.</span>
-                <span class="font-bold">
-                  {{ entry.name }}
-                  <span v-if="entry.name === store.playerName" class="badge badge-primary badge-xs"
-                    >you</span
-                  >
-                </span>
-                <span class="ml-auto font-black"> {{ (entry.score / 1000).toFixed(1) }} pts </span>
-              </li>
-            </ul>
+          <div class="mt-4 grid gap-2">
+            <button class="btn btn-outline w-full" @click="store.returnToLobby()">
+              Back to lobby
+            </button>
+            <button class="btn btn-primary w-full" @click="done">Done</button>
           </div>
-          <button class="btn btn-ghost mt-2 w-full" @click="done">Quit lobby</button>
         </div>
       </div>
 
@@ -305,7 +283,7 @@ function done() {
           <div class="w-full text-left">
             <LobbyChat />
           </div>
-          <button class="btn btn-ghost" @click="done">Leave lobby</button>
+          <button class="btn btn-ghost" @click="requestLeave">Leave lobby</button>
         </div>
       </div>
 
@@ -457,6 +435,24 @@ function done() {
         </aside>
       </div>
     </main>
+
+    <!-- leave-lobby verification -->
+    <dialog ref="exitDialogRef" class="modal">
+      <div class="modal-box">
+        <h3 class="text-lg font-bold">Leave the lobby?</h3>
+        <p class="py-4 text-sm opacity-80">
+          You'll leave Room {{ store.roomCode || 'PENDING' }} and need the room code to rejoin.
+          Are you sure you want to exit the lobby?
+        </p>
+        <div class="modal-action">
+          <button class="btn btn-ghost" @click="exitDialogRef?.close()">Stay</button>
+          <button class="btn btn-error" @click="confirmLeave">Leave lobby</button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+      </form>
+    </dialog>
 
     <!-- host-ended modal -->
     <dialog ref="closedDialogRef" class="modal">
