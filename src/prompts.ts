@@ -32,10 +32,10 @@ export function buildQuizPrompt(
       Mix the questions from different topics randomly — do not group them by topic.
       Cover a varied mix of subtopics and angles — do not ask only the most
       obvious, canonical questions on each topic.
-      ${seedLine}
       ${exclusion}
       The output JSON must contain a "results" array with exactly ${count} entries.
       Do not stop early, do not summarize, and do not skip any questions.
       Return all ${count} questions, then stop.
+      ${seedLine}
     `
 }
