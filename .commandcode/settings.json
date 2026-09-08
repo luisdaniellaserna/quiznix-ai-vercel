@@ -16,7 +16,8 @@
       "Shell(node --test server/roomManager.test.mjs 2 >& 1)",
       "Shell(Select-Object:*)",
       "Shell(findstr:*)",
-      "Shell(dir:*)"
+      "Shell(dir:*)",
+      "Shell(node --test --test-name-pattern=\"restartRoom moves finished\" \"server/roomManager.test.mjs\")"
     ],
     "deny": [],
     "defaultMode": "default"
