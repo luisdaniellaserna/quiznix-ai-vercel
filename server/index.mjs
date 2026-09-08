@@ -147,6 +147,17 @@ function handleMessage(ws, raw) {
       case 'next-question':
         manager.nextQuestion(clientId)
         break
+      case 'restart-room':
+        manager.restartRoom(clientId)
+        break
+      case 'start-next-game':
+        manager.startNextGame(clientId, {
+          topic: message.topic,
+          timerSeconds: message.timerSeconds,
+          maxPlayers: message.maxPlayers,
+          questions: message.questions,
+        })
+        break
       case 'close-room': {
         manager.closeRoom(clientId)
         const info = clientInfo.get(clientId)

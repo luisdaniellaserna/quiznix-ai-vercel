@@ -26,6 +26,7 @@ const userAnswers = ref<UserAnswer[]>([])
 const selectedMode = ref<Mode>('easy')
 const timedMode = ref(true)
 const returnFromQuiz = ref(false)
+const hostReplayMode = ref(false)
 
 // one room session per browser — used to surface the cross-tab takeover confirm
 interface BlockingSession {
@@ -306,13 +307,27 @@ async function proceedWithGroupStart(payload: {
       sessionId,
     )
     const results = shuffleQuestions(generated.results)
+    hostReplayMode.value = false
     if (payload.gameMode === 'group') {
-      groupStore.createRoom({
-        topic: payload.topics.join(', '),
-        questions: results,
-        timerSeconds: payload.timePerQuestion ?? MODE_CONFIG[payload.mode].timerSeconds,
-        maxPlayers: payload.maxPlayers ?? 10,
-      })
+      // Host is replaying after a finished round → reuse the existing room
+      // (same player ids, same room code) instead of creating a new one.
+      const replaying =
+        groupStore.role === 'host' && groupStore.phase === 'between-rounds'
+      if (replaying) {
+        groupStore.startNextGame({
+          topic: payload.topics.join(', '),
+          questions: results,
+          timerSeconds: payload.timePerQuestion ?? MODE_CONFIG[payload.mode].timerSeconds,
+          maxPlayers: payload.maxPlayers ?? 10,
+        })
+      } else {
+        groupStore.createRoom({
+          topic: payload.topics.join(', '),
+          questions: results,
+          timerSeconds: payload.timePerQuestion ?? MODE_CONFIG[payload.mode].timerSeconds,
+          maxPlayers: payload.maxPlayers ?? 10,
+        })
+      }
       status.value = 'group'
     } else {
       question.value = { ...generated, results }
@@ -363,8 +378,19 @@ function leaveGroup() {
 
 function reset() {
   returnFromQuiz.value = true
+  hostReplayMode.value = false
   status.value = 'start'
   userAnswers.value = []
+}
+
+// Host clicked "Play again" on the leaderboard — ask the server to enter
+// between-rounds (which preserves the room + roster + player ids), then take
+// the host back to the start screen so they can pick new topics.
+function playAgain() {
+  groupStore.restartRoom()
+  status.value = 'start'
+  returnFromQuiz.value = false
+  hostReplayMode.value = true
 }
 </script>
 
@@ -373,11 +399,12 @@ function reset() {
     <StartScreen
       v-if="status === 'start' && apiKey"
       :return-from-quiz="returnFromQuiz"
+      :from-group-replay="hostReplayMode"
       @start-quiz="startQuiz"
       @join-group="joinGroup"
     />
 
-    <GroupHost v-else-if="status === 'group' && groupStore.role === 'host'" @leave="leaveGroup" />
+    <GroupHost v-else-if="status === 'group' && groupStore.role === 'host'" @leave="leaveGroup" @play-again="playAgain" />
     <GroupPlayer
       v-else-if="status === 'group' && groupStore.role === 'player'"
       @leave="leaveGroup"

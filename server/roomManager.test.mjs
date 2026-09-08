@@ -708,3 +708,111 @@ test('scoreboard reflects cumulative scores through the just-finished question',
   assert.ok(allAnswered.scoreboard[0].score > 0)
   assert.ok(allAnswered.scoreboard[1].score > 0)
 })
+
+test('restartRoom moves finished rooms into between-rounds and preserves the roster', () => {
+  let currentTime = NOW
+  const { manager, sends } = makeHarness({ now: () => currentTime })
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(1),
+  })
+  const ana = manager.joinRoom('player-1', code, 'Ana')
+  manager.startGame('host-1')
+  // nextQuestion on a 1-question game schedules a 3s force-reveal; advance past it
+  manager.nextQuestion('host-1')
+  currentTime = NOW + 3000
+  manager.processAdvances(currentTime)
+
+  manager.restartRoom('host-1')
+
+  const room = manager.rooms.get(code)
+  assert.equal(room.phase, 'between-rounds')
+  assert.equal(room.index, -1)
+  // player still in roster with same id and empty answers
+  assert.equal(room.players.size, 1)
+  assert.equal(room.players.has(ana.playerId), true)
+  assert.equal(room.players.get(ana.playerId).answers.size, 0)
+  // emitted to all
+  const reset = sentTo(sends, 'all').find((m) => m.type === 'room-resetting')
+  assert.ok(reset)
+  assert.equal(reset.topic, 'JS')
+  assert.equal(reset.leaderboard.length, 1)
+  assert.equal(reset.leaderboard[0].name, 'Ana')
+})
+
+test('restartRoom rejects non-hosts and rooms that are not finished', () => {
+  const { manager } = makeHarness()
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  manager.joinRoom('player-1', code, 'Ana')
+
+  assert.throws(() => manager.restartRoom('player-1'), /host/i)
+  // still in lobby — can't restart
+  assert.throws(() => manager.restartRoom('host-1'), /finished/i)
+  manager.startGame('host-1')
+  // mid-game — can't restart
+  assert.throws(() => manager.restartRoom('host-1'), /finished/i)
+})
+
+test('startNextGame replaces questions and starts at index 0', () => {
+  let currentTime = NOW
+  const { manager, sends } = makeHarness({ now: () => currentTime })
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(1),
+  })
+  manager.joinRoom('player-1', code, 'Ana')
+  manager.startGame('host-1')
+  manager.nextQuestion('host-1')
+  currentTime = NOW + 3000
+  manager.processAdvances(currentTime)
+  manager.restartRoom('host-1')
+
+  manager.startNextGame('host-1', {
+    topic: 'Cats',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+
+  const room = manager.rooms.get(code)
+  assert.equal(room.phase, 'question')
+  assert.equal(room.index, 0)
+  assert.equal(room.topic, 'Cats')
+  const q = lastSentTo(sends, 'all')
+  assert.equal(q.type, 'question-started')
+  assert.equal(q.index, 0)
+  assert.equal(q.total, 2)
+  // scoreboard reset
+  assert.equal(q.scoreboard.length, 1)
+  assert.equal(q.scoreboard[0].correct, 0)
+})
+
+test('startNextGame rejects when not in between-rounds', () => {
+  const { manager } = makeHarness()
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(1),
+  })
+  manager.joinRoom('player-1', code, 'Ana')
+  assert.throws(
+    () =>
+      manager.startNextGame('host-1', {
+        topic: 'Cats',
+        timerSeconds: TIMER,
+        maxPlayers: 10,
+        questions: makeQuestions(1),
+      }),
+    /finished/i,
+  )
+})

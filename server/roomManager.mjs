@@ -257,6 +257,71 @@ export class RoomManager {
     }
   }
 
+  // Host kicked off a new round from the leaderboard. Players stay in the room
+  // (same playerIds, same roster) and see a "waiting for host" card with the
+  // last round's results + a Quit button until the host picks new topics.
+  restartRoom(clientId) {
+    const room = this.roomOfHost(clientId)
+    if (room.phase !== 'finished') {
+      throw new Error('Can only restart after a finished game.')
+    }
+    if (room.players.size === 0) {
+      throw new Error('No players are still in the room.')
+    }
+    const finalLeaderboard = this.leaderboard(room)
+    // clear per-question state but keep the roster and playerIds so players don't
+    // need to rejoin when the host picks a new topic
+    room.phase = 'between-rounds'
+    room.index = -1
+    room.deadline = 0
+    room.pendingAdvance = null
+    for (const player of room.players.values()) {
+      player.answers.clear()
+    }
+    this.emit(room.code, 'all', {
+      type: 'room-resetting',
+      leaderboard: finalLeaderboard,
+      topic: room.topic,
+    })
+  }
+
+  // Host picked new topics and the next round is ready. Server replaces the
+  // questions, resets per-round state, and goes straight to question 0 (skipping
+  // the lobby phase since players are already in the room).
+  startNextGame(clientId, { topic, timerSeconds, maxPlayers, questions }) {
+    const room = this.roomOfHost(clientId)
+    if (room.phase !== 'between-rounds') {
+      throw new Error('The previous round is not finished.')
+    }
+    const valid = Array.isArray(questions) && questions.length > 0 &&
+      questions.every(
+        (q) =>
+          typeof q.question === 'string' &&
+          q.question !== '' &&
+          typeof q.correct_answer === 'string' &&
+          q.correct_answer !== '' &&
+          Array.isArray(q.incorrect_answers) &&
+          q.incorrect_answers.length >= 1,
+      )
+    if (!valid) {
+      throw new Error('Invalid question set.')
+    }
+    if (!Number.isFinite(timerSeconds) || timerSeconds <= 0) {
+      throw new Error('Invalid timer setting.')
+    }
+    if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 100) {
+      throw new Error('Max participants must be between 2 and 100.')
+    }
+    room.topic = String(topic ?? '')
+    room.timerSeconds = timerSeconds
+    room.maxPlayers = maxPlayers
+    room.questions = questions
+    for (const player of room.players.values()) {
+      player.answers.clear()
+    }
+    this.startQuestion(room, 0)
+  }
+
   scheduleAdvance(room, delayMs) {
     room.pendingAdvance = { scheduledAt: this.now(), delayMs }
   }
@@ -343,6 +408,12 @@ export class RoomManager {
       }
     } else if (room.phase === 'finished') {
       this.emit(roomCode, 'host', { type: 'game-finished', leaderboard: this.leaderboard(room) }, clientId)
+    } else if (room.phase === 'between-rounds') {
+      this.emit(roomCode, 'host', {
+        type: 'room-resetting',
+        leaderboard: this.leaderboard(room),
+        topic: room.topic,
+      }, clientId)
     }
     return { code: roomCode }
   }
@@ -402,6 +473,12 @@ export class RoomManager {
         }, clientId)
       } else if (room.phase === 'finished') {
         this.emit(roomCode, playerId, { type: 'game-finished', leaderboard: this.leaderboard(room) }, clientId)
+      } else if (room.phase === 'between-rounds') {
+        this.emit(roomCode, playerId, {
+          type: 'room-resetting',
+          leaderboard: this.leaderboard(room),
+          topic: room.topic,
+        }, clientId)
       }
       return { code: roomCode, playerId }
     }
@@ -429,6 +506,14 @@ export class RoomManager {
             deadline: room.deadline,
             correctAnswer: room.questions[room.index].correct_answer,
             scoreboard: buildScoreboard(room),
+          }, clientId)
+        } else if (room.phase === 'finished') {
+          this.emit(roomCode, pid, { type: 'game-finished', leaderboard: this.leaderboard(room) }, clientId)
+        } else if (room.phase === 'between-rounds') {
+          this.emit(roomCode, pid, {
+            type: 'room-resetting',
+            leaderboard: this.leaderboard(room),
+            topic: room.topic,
           }, clientId)
         }
         return { code: roomCode, playerId: pid }

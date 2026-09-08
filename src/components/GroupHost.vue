@@ -6,7 +6,7 @@ import SettingsMenu from './SettingsMenu.vue'
 import ConfettiBurst from './ConfettiBurst.vue'
 import FinalLeaderboard from './FinalLeaderboard.vue'
 
-const emit = defineEmits<{ leave: [] }>()
+const emit = defineEmits<{ leave: []; 'play-again': [] }>()
 
 const store = useGroupStore()
 const countdown = useCountdown(() => store.deadline)
@@ -18,7 +18,9 @@ const isLastQuestion = computed(() => store.currentIndex + 1 >= store.total)
 const allAnswered = computed(
   () => store.players.length > 0 && answeredCount.value >= store.players.length,
 )
-const canAdvance = computed(() => countdown.expired.value || allAnswered.value || answeredCount.value > 0)
+const canAdvance = computed(
+  () => countdown.expired.value || allAnswered.value || answeredCount.value > 0,
+)
 
 // no dead air: when everyone submitted, show correct answer 4s then auto-advance
 watch(allAnswered, (done) => {
@@ -45,7 +47,9 @@ watch(
   },
 )
 
-const correctAnswer = computed(() => store.correctAnswer || store.hostQuestions[store.currentIndex]?.correct_answer || '')
+const correctAnswer = computed(
+  () => store.correctAnswer || store.hostQuestions[store.currentIndex]?.correct_answer || '',
+)
 const hasWakeLock = typeof navigator !== 'undefined' && 'wakeLock' in navigator
 
 // keep host screen awake during lobby/question so phone sleep doesn't kill the WS
@@ -83,7 +87,10 @@ watch(
 )
 if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && (store.phase === 'lobby' || store.phase === 'question')) {
+    if (
+      document.visibilityState === 'visible' &&
+      (store.phase === 'lobby' || store.phase === 'question')
+    ) {
       void requestWakeLock()
     }
   })
@@ -164,6 +171,10 @@ function finish() {
   store.closeRoom()
   emit('leave')
 }
+
+function playAgain() {
+  emit('play-again')
+}
 </script>
 
 <template>
@@ -186,8 +197,14 @@ function finish() {
     </header>
 
     <main class="mx-auto w-full max-w-3xl p-4">
-      <div v-if="(store.phase === 'lobby' || store.phase === 'question') && !hasWakeLock" class="alert alert-warning mb-4 text-sm">
-        <span>Keep this tab visible — some phones disconnect when the screen locks. Tap Exit only to end.</span>
+      <div
+        v-if="(store.phase === 'lobby' || store.phase === 'question') && !hasWakeLock"
+        class="alert alert-warning mb-4 text-sm"
+      >
+        <span
+          >Keep this tab visible — some phones disconnect when the screen locks. Tap Exit only to
+          end.</span
+        >
       </div>
       <!-- closed by the host or a lost connection -->
       <div v-if="store.phase === 'closed'" class="card mt-4 shadow-xl">
@@ -222,7 +239,10 @@ function finish() {
           <h2 class="text-center text-2xl font-black">🏆 Final scores</h2>
           <p class="text-center font-medium opacity-70">{{ store.topic }}</p>
           <FinalLeaderboard :entries="store.leaderboard ?? []" />
-          <button class="btn btn-error mt-4" @click="finish">End exam</button>
+          <div class="card-actions mt-4">
+            <button class="btn btn-primary flex-1" @click="playAgain">Play again</button>
+            <button class="btn btn-error" @click="finish">End exam</button>
+          </div>
         </div>
       </div>
 
@@ -231,7 +251,11 @@ function finish() {
         <div class="card-body items-center gap-4 text-center">
           <div>
             <span class="label text-base font-semibold opacity-70">Room code</span>
-            <div class="break-all text-3xl font-black tracking-[0.2em] sm:text-4xl sm:tracking-[0.3em] md:text-5xl md:tracking-[0.35em]">{{ store.roomCode }}</div>
+            <div
+              class="break-all text-3xl font-black tracking-[0.2em] sm:text-4xl sm:tracking-[0.3em] md:text-5xl md:tracking-[0.35em]"
+            >
+              {{ store.roomCode }}
+            </div>
           </div>
           <p class="max-w-md text-sm opacity-70">
             Players open Quiznix AI on their gadgets, enter this code and their name to join.
@@ -303,11 +327,18 @@ function finish() {
 
           <!-- 3-5s reveal: show correct answer to host (and players see via their own reveal) -->
           <div v-if="countdown.expired.value && correctAnswer" class="alert alert-success">
-            <span>Correct answer: <strong>{{ correctAnswer }}</strong></span>
+            <span
+              >Correct answer: <strong>{{ correctAnswer }}</strong></span
+            >
             <span class="text-xs opacity-70">Next in a few seconds…</span>
           </div>
-          <div v-else-if="allAnswered && !countdown.expired.value && correctAnswer" class="alert alert-info">
-            <span>All answers in! Revealing correct answer: <strong>{{ correctAnswer }}</strong></span>
+          <div
+            v-else-if="allAnswered && !countdown.expired.value && correctAnswer"
+            class="alert alert-info"
+          >
+            <span
+              >All answers in! Revealing correct answer: <strong>{{ correctAnswer }}</strong></span
+            >
           </div>
 
           <div class="flex items-center justify-between gap-2">
@@ -326,8 +357,8 @@ function finish() {
       <div class="modal-box">
         <h3 class="text-lg font-bold">Exit quiz?</h3>
         <p class="py-4 text-sm opacity-80">
-          This will end the quiz for everyone. Players will see “Quiz has ended by the host”.
-          Are you sure you want to exit?
+          This will end the quiz for everyone. Players will see “Quiz has ended by the host”. Are
+          you sure you want to exit?
         </p>
         <div class="modal-action">
           <button class="btn btn-ghost" @click="exitDialogRef?.close()">Cancel</button>

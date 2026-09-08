@@ -20,6 +20,9 @@ const emit = defineEmits<{
 
 const props = defineProps<{
   returnFromQuiz: boolean
+  /** Set when the host hit "Play again" on the group leaderboard — prefill
+   * the form with their last group settings and jump straight to it. */
+  fromGroupReplay?: boolean
 }>()
 
 type Step = 'landing' | 'mode' | 'form' | 'groupChoice' | 'groupJoin'
@@ -56,7 +59,7 @@ function removeTopic(index: number) {
   extraTopics.value.splice(index, 1)
 }
 
-// restore saved settings only when returning from a solo quiz (not on hard refresh)
+// restore saved settings only when returning from a quiz (not on hard refresh)
 if (props.returnFromQuiz) {
   const saved = localStorage.getItem('quiznix-setup')
   if (saved) {
@@ -76,6 +79,33 @@ if (props.returnFromQuiz) {
         timed.value = s.timed !== false
         step.value = 'form'
       }
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+// Host hit "Play again" — restore their last group settings and jump to the form
+if (props.fromGroupReplay) {
+  const saved = localStorage.getItem('quiznix-setup-group')
+  if (saved) {
+    try {
+      const s = JSON.parse(saved) as {
+        topics: string[]
+        mode: Mode
+        itemCount: number
+        maxParticipants: number
+        timePerQuestion: number
+      }
+      topic.value = ''
+      extraTopics.value = s.topics ?? []
+      mode.value = s.mode || 'easy'
+      itemCount.value = s.itemCount || 5
+      maxParticipants.value = s.maxParticipants || 10
+      timePerQuestion.value = s.timePerQuestion || MODE_CONFIG[s.mode || 'easy'].timerSeconds
+      timeTouched.value = true
+      gameMode.value = 'group'
+      step.value = 'form'
     } catch {
       /* ignore */
     }
@@ -111,6 +141,19 @@ function saveSettings() {
       timed: timed.value,
     }),
   )
+  // also remember group-mode fields so "Play again" can prefill them
+  if (gameMode.value === 'group') {
+    localStorage.setItem(
+      'quiznix-setup-group',
+      JSON.stringify({
+        topics: allTopics.value,
+        mode: mode.value,
+        itemCount: itemCount.value,
+        maxParticipants: maxParticipants.value,
+        timePerQuestion: timePerQuestion.value,
+      }),
+    )
+  }
 }
 
 const steps = [

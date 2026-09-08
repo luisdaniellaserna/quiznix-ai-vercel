@@ -10,7 +10,13 @@ const emit = defineEmits<{
   leave: []
   'room-conflict': [
     payload: {
-      blocker: { tabId: string; code: string; role: 'host' | 'player'; playerName?: string; ageMs: number }
+      blocker: {
+        tabId: string
+        code: string
+        role: 'host' | 'player'
+        playerName?: string
+        ageMs: number
+      }
       code: string
       name: string
     },
@@ -195,12 +201,50 @@ function done() {
 
       <!-- final leaderboard -->
       <div v-else-if="store.phase === 'finished'" class="card mt-4 shadow-xl">
+        <ConfettiBurst v-if="isWinner" />
         <div class="card-body">
           <h2 class="text-center text-2xl font-black">🏆 Final scores</h2>
           <p class="text-center font-medium opacity-70">{{ store.topic }}</p>
-        <ConfettiBurst v-if="isWinner" />
           <FinalLeaderboard :entries="store.leaderboard ?? []" :highlight-name="store.playerName" />
           <button class="btn btn-primary mt-4" @click="done">Done</button>
+        </div>
+      </div>
+
+      <!-- host hit "Play again" — last results stay visible while the host
+           picks a new round. Players can wait or quit. -->
+      <div v-else-if="store.phase === 'between-rounds'" class="card mt-4 shadow-xl">
+        <div class="card-body items-center gap-3 text-center">
+          <span class="loading loading-spinner loading-lg text-primary"></span>
+          <h2 class="text-xl font-bold">Waiting for host…</h2>
+          <p class="text-sm opacity-70">
+            The host is choosing a new game. You'll jump back in automatically once they start.
+          </p>
+          <p v-if="store.topic" class="text-xs opacity-60">Last round: {{ store.topic }}</p>
+          <div v-if="store.lastFinalLeaderboard?.length" class="mt-2 w-full">
+            <p class="mb-2 text-xs font-semibold uppercase tracking-wider opacity-60">Last round</p>
+            <ul class="grid gap-1">
+              <li
+                v-for="(entry, index) in store.lastFinalLeaderboard"
+                :key="entry.name + index"
+                class="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm"
+                :class="
+                  entry.name === store.playerName
+                    ? 'border-primary bg-primary/5'
+                    : 'border-base-300'
+                "
+              >
+                <span class="font-bold opacity-70">{{ index + 1 }}.</span>
+                <span class="font-bold">
+                  {{ entry.name }}
+                  <span v-if="entry.name === store.playerName" class="badge badge-primary badge-xs"
+                    >you</span
+                  >
+                </span>
+                <span class="ml-auto font-black"> {{ (entry.score / 1000).toFixed(1) }} pts </span>
+              </li>
+            </ul>
+          </div>
+          <button class="btn btn-ghost mt-2 w-full" @click="done">Quit lobby</button>
         </div>
       </div>
 
@@ -262,11 +306,16 @@ function done() {
       </div>
 
       <!-- answering a question -->
-      <div v-else-if="store.phase === 'question'" class="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start">
+      <div
+        v-else-if="store.phase === 'question'"
+        class="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start"
+      >
         <div class="card flex-1 shadow-xl">
           <div class="card-body gap-4">
             <div class="flex items-center justify-between">
-              <span class="font-bold">Question {{ store.currentIndex + 1 }} / {{ store.total }}</span>
+              <span class="font-bold"
+                >Question {{ store.currentIndex + 1 }} / {{ store.total }}</span
+              >
               <span
                 class="badge badge-lg"
                 :class="countdown.expired.value ? 'badge-error' : 'badge-primary'"
@@ -287,10 +336,14 @@ function done() {
                 class="btn btn-lg h-auto min-h-12 justify-start whitespace-normal break-words py-3 text-left rounded-xl"
                 :class="{
                   'btn-success': isRevealed && option === store.correctAnswer,
-                  'btn-error': isRevealed && option === store.myAnswer && option !== store.correctAnswer,
-                  'btn-primary': !isRevealed && (selectedOption === option || store.myAnswer === option),
-                  'btn-outline': !isRevealed && selectedOption !== option && store.myAnswer !== option,
-                  'opacity-60': isRevealed && option !== store.correctAnswer && option !== store.myAnswer,
+                  'btn-error':
+                    isRevealed && option === store.myAnswer && option !== store.correctAnswer,
+                  'btn-primary':
+                    !isRevealed && (selectedOption === option || store.myAnswer === option),
+                  'btn-outline':
+                    !isRevealed && selectedOption !== option && store.myAnswer !== option,
+                  'opacity-60':
+                    isRevealed && option !== store.correctAnswer && option !== store.myAnswer,
                 }"
                 :disabled="countdown.expired.value || hasSubmitted"
                 @click="selectOption(option)"
@@ -303,14 +356,26 @@ function done() {
               :disabled="!selectedOption || hasSubmitted || countdown.expired.value"
               @click="submitAnswer"
             >
-              {{ hasSubmitted ? 'Submitted ✓' : countdown.expired.value ? 'Time up' : 'Submit answer' }}
+              {{
+                hasSubmitted ? 'Submitted ✓' : countdown.expired.value ? 'Time up' : 'Submit answer'
+              }}
             </button>
 
             <!-- reveal is gated on all-answered / timer expired / host force-skip -->
-            <div v-if="isRevealed && store.correctAnswer" class="alert justify-center gap-2" :class="store.myAnswer === store.correctAnswer ? 'alert-success' : 'alert-error'">
-              <span v-if="store.myAnswer === store.correctAnswer">Correct! Answer: <strong>{{ store.correctAnswer }}</strong></span>
-              <span v-else-if="hasSubmitted">Not quite. Correct answer: <strong>{{ store.correctAnswer }}</strong></span>
-              <span v-else>Correct answer: <strong>{{ store.correctAnswer }}</strong></span>
+            <div
+              v-if="isRevealed && store.correctAnswer"
+              class="alert justify-center gap-2"
+              :class="store.myAnswer === store.correctAnswer ? 'alert-success' : 'alert-error'"
+            >
+              <span v-if="store.myAnswer === store.correctAnswer"
+                >Correct! Answer: <strong>{{ store.correctAnswer }}</strong></span
+              >
+              <span v-else-if="hasSubmitted"
+                >Not quite. Correct answer: <strong>{{ store.correctAnswer }}</strong></span
+              >
+              <span v-else
+                >Correct answer: <strong>{{ store.correctAnswer }}</strong></span
+              >
               <span class="text-xs opacity-70">
                 {{
                   countdown.expired.value
@@ -344,9 +409,7 @@ function done() {
         <aside class="flex w-full flex-col gap-3 lg:sticky lg:top-4 lg:w-64 lg:shrink-0">
           <div class="card shadow-xl">
             <div class="card-body gap-1 p-4">
-              <p class="text-xs font-semibold uppercase tracking-wider opacity-60">
-                Answered
-              </p>
+              <p class="text-xs font-semibold uppercase tracking-wider opacity-60">Answered</p>
               <p class="text-2xl font-black">
                 {{ answeredDisplay }}<span class="opacity-50">/{{ totalDisplay }}</span>
               </p>
@@ -369,12 +432,11 @@ function done() {
 
           <div class="card shadow-xl">
             <div class="card-body gap-1 p-4">
-              <p class="text-xs font-semibold uppercase tracking-wider opacity-60">
-                Current rank
-              </p>
+              <p class="text-xs font-semibold uppercase tracking-wider opacity-60">Current rank</p>
               <p class="text-2xl font-black">
                 <template v-if="store.myRank > 0">
-                  <span class="text-primary">{{ rankLabel }}</span><span class="opacity-50">/{{ totalRoster }}</span>
+                  <span class="text-primary">{{ rankLabel }}</span
+                  ><span class="opacity-50">/{{ totalRoster }}</span>
                 </template>
                 <template v-else>
                   <span class="opacity-50">—</span>
@@ -384,9 +446,7 @@ function done() {
                 <template v-if="store.myRank > 0">
                   {{ myScoreLine }}
                 </template>
-                <template v-else>
-                  Ranking will appear after the first question.
-                </template>
+                <template v-else> Ranking will appear after the first question. </template>
               </p>
             </div>
           </div>
@@ -398,7 +458,9 @@ function done() {
     <dialog ref="closedDialogRef" class="modal">
       <div class="modal-box text-center">
         <h3 class="text-lg font-bold">Quiz has ended by the host</h3>
-        <p class="py-4 text-sm opacity-80">{{ store.closedMessage || 'The host ended the quiz.' }}</p>
+        <p class="py-4 text-sm opacity-80">
+          {{ store.closedMessage || 'The host ended the quiz.' }}
+        </p>
         <div class="modal-action justify-center">
           <button class="btn btn-primary" @click="done">Back to home</button>
         </div>
