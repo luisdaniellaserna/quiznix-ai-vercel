@@ -60,7 +60,12 @@ function parseAndValidate(raw: string): Questions {
   return parsed
 }
 
-async function geminiMain(topics: string[], mode: Mode, count: number): Promise<Questions> {
+async function geminiMain(
+  topics: string[],
+  mode: Mode,
+  count: number,
+  sessionId: string,
+): Promise<Questions> {
   const ai = new GoogleGenAI({ apiKey })
 
   const config = {
@@ -113,7 +118,7 @@ async function geminiMain(topics: string[], mode: Mode, count: number): Promise<
     },
   }
 
-  const contents = buildQuizPrompt(topics, mode, count)
+  const contents = buildQuizPrompt(topics, mode, count, sessionId)
 
   const response = await ai.models.generateContent({
     model: 'gemini-3.6-flash',
@@ -123,7 +128,12 @@ async function geminiMain(topics: string[], mode: Mode, count: number): Promise<
   return parseAndValidate(response.text ?? '')
 }
 
-async function deepseekMain(topics: string[], mode: Mode, count: number): Promise<Questions> {
+async function deepseekMain(
+  topics: string[],
+  mode: Mode,
+  count: number,
+  sessionId: string,
+): Promise<Questions> {
   const openai = new OpenAI({
     baseURL: 'https://api.deepseek.com',
     apiKey,
@@ -132,11 +142,12 @@ async function deepseekMain(topics: string[], mode: Mode, count: number): Promis
 
   const systemPrompt = `
     The user will provide a request or topic for a quiz. Your task is to interpret the INTENT or THEME behind the user's input—especially if it is slang, a colloquialism, or an abstract concept—and generate quiz questions based on that underlying idea rather than using the word literally.
-    
+
     Rules:
     1. Parse idioms, slang, and cultural context (e.g., "kalokohan" means silly trivia, funny facts, or absurd situations).
     2. Map the request to a recognized quiz category (e.g., General Knowledge, Pop Culture, Science & Nature, Entertainment).
     3. Always respond strictly in the valid JSON format specified below, with no markdown code blocks or surrounding text.
+    4. Treat every request as a brand-new, independent conversation. Ignore any prior quizzes, topics, examples, or cached context. Do not reuse, repeat, or be influenced by questions, categories, or examples from any previous session — generate completely fresh questions that fit only the topics given in the current user message.
 
     EXAMPLE INPUT 1:
     Create a 5 quiz question about JavaScript.
@@ -153,7 +164,7 @@ async function deepseekMain(topics: string[], mode: Mode, count: number): Promis
     {"response_code":0,"results":[{"type":"multiple","difficulty":"easy","category":"General Knowledge","question":"What did a man in 2011 successfully register as a religion in New Zealand?","correct_answer":"Church of the Flying Spaghetti Monster","incorrect_answers":["Jediism","Pastafarianism","Dudeism"]}]}
   `
 
-  const userPrompt = buildQuizPrompt(topics, mode, count)
+  const userPrompt = buildQuizPrompt(topics, mode, count, sessionId)
 
   const completion = await openai.chat.completions.create({
     messages: [
@@ -172,10 +183,15 @@ async function deepseekMain(topics: string[], mode: Mode, count: number): Promis
   return parseAndValidate(response ?? '')
 }
 
-function generateQuestions(topics: string[], mode: Mode, count: number): Promise<Questions> {
+function generateQuestions(
+  topics: string[],
+  mode: Mode,
+  count: number,
+  sessionId: string,
+): Promise<Questions> {
   return apiProvider === 'deepseek'
-    ? deepseekMain(topics, mode, count)
-    : geminiMain(topics, mode, count)
+    ? deepseekMain(topics, mode, count, sessionId)
+    : geminiMain(topics, mode, count, sessionId)
 }
 
 // guarantee a randomized question order regardless of the AI's output ordering
@@ -204,10 +220,12 @@ async function startQuiz(payload: {
   timedMode.value = payload.timed
 
   try {
+    const sessionId = crypto.randomUUID()
     const generated = await generateQuestions(
       payload.topics.filter((topic) => topic !== ''),
       payload.mode,
       payload.itemCount,
+      sessionId,
     )
     const results = shuffleQuestions(generated.results)
     if (payload.gameMode === 'group') {
