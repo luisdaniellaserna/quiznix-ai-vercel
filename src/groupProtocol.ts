@@ -62,6 +62,13 @@ export type GroupClientMessage =
   | { type: 'restart-room' }
   | { type: 'back-to-lobby' }
   | {
+      type: 'update-room-quiz'
+      topic: string
+      timerSeconds: number
+      maxPlayers: number
+      questions: QuestionFormat[]
+    }
+  | {
       type: 'start-next-game'
       topic: string
       timerSeconds: number

@@ -6,7 +6,7 @@ import SettingsMenu from './SettingsMenu.vue'
 import ConfettiBurst from './ConfettiBurst.vue'
 import FinalLeaderboard from './FinalLeaderboard.vue'
 
-const emit = defineEmits<{ leave: []; 'play-again': [] }>()
+const emit = defineEmits<{ leave: []; 'play-again': []; 'back-to-lobby': [] }>()
 
 const store = useGroupStore()
 const countdown = useCountdown(() => store.deadline)
@@ -175,6 +175,10 @@ function finish() {
 function playAgain() {
   emit('play-again')
 }
+
+function backToLobby() {
+  emit('back-to-lobby')
+}
 </script>
 
 <template>
@@ -241,7 +245,7 @@ function playAgain() {
           <FinalLeaderboard :entries="store.leaderboard ?? []" />
           <div class="card-actions mt-4 flex-wrap">
             <button class="btn btn-primary flex-1" @click="playAgain">Play again</button>
-            <button class="btn btn-outline" @click="store.backToLobby()">Back to lobby</button>
+            <button class="btn btn-outline" @click="backToLobby">Back to lobby</button>
             <button class="btn btn-error" @click="finish">End exam</button>
           </div>
         </div>

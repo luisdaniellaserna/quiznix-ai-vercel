@@ -313,8 +313,19 @@ async function proceedWithGroupStart(payload: {
       // (same player ids, same room code) instead of creating a new one.
       const replaying =
         groupStore.role === 'host' && groupStore.phase === 'between-rounds'
+      // Host went back to the lobby (to change the setup) → replace the room's
+      // quiz content in place and stay in the lobby until they press Start.
+      const updatingLobbyRoom =
+        groupStore.role === 'host' && groupStore.phase === 'lobby' && groupStore.roomCode !== ''
       if (replaying) {
         groupStore.startNextGame({
+          topic: payload.topics.join(', '),
+          questions: results,
+          timerSeconds: payload.timePerQuestion ?? MODE_CONFIG[payload.mode].timerSeconds,
+          maxPlayers: payload.maxPlayers ?? 10,
+        })
+      } else if (updatingLobbyRoom) {
+        groupStore.updateRoomQuiz({
           topic: payload.topics.join(', '),
           questions: results,
           timerSeconds: payload.timePerQuestion ?? MODE_CONFIG[payload.mode].timerSeconds,
@@ -392,6 +403,16 @@ function playAgain() {
   returnFromQuiz.value = false
   hostReplayMode.value = true
 }
+
+// Host clicked "Back to lobby" on the leaderboard — move the room back to the
+// lobby (same code, same roster, new players can join), then take the host
+// back to the start screen so they can change the setup before rematching.
+function backToLobby() {
+  groupStore.backToLobby()
+  status.value = 'start'
+  returnFromQuiz.value = false
+  hostReplayMode.value = true
+}
 </script>
 
 <template>
@@ -404,7 +425,12 @@ function playAgain() {
       @join-group="joinGroup"
     />
 
-    <GroupHost v-else-if="status === 'group' && groupStore.role === 'host'" @leave="leaveGroup" @play-again="playAgain" />
+    <GroupHost
+      v-else-if="status === 'group' && groupStore.role === 'host'"
+      @leave="leaveGroup"
+      @play-again="playAgain"
+      @back-to-lobby="backToLobby"
+    />
     <GroupPlayer
       v-else-if="status === 'group' && groupStore.role === 'player'"
       @leave="leaveGroup"

@@ -879,6 +879,82 @@ test('backToLobby also works from between-rounds', () => {
   assert.ok(sentTo(sends, 'all').find((m) => m.type === 'room-to-lobby'))
 })
 
+test('updateRoomQuiz replaces lobby content in place and stays in the lobby', () => {
+  let currentTime = NOW
+  const { manager, sends } = makeHarness({ now: () => currentTime })
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(1),
+  })
+  const ana = manager.joinRoom('player-1', code, 'Ana')
+  manager.startGame('host-1')
+  manager.nextQuestion('host-1')
+  currentTime = NOW + 3000
+  manager.processAdvances(currentTime)
+  manager.backToLobby('host-1')
+
+  manager.updateRoomQuiz('host-1', {
+    topic: 'Cats',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(3),
+  })
+
+  const room = manager.rooms.get(code)
+  assert.equal(room.phase, 'lobby')
+  assert.equal(room.topic, 'Cats')
+  assert.equal(room.questions.length, 3)
+  // same roster kept
+  assert.equal(room.players.size, 1)
+  assert.equal(room.players.has(ana.playerId), true)
+  const toLobby = sentTo(sends, 'all').filter((m) => m.type === 'room-to-lobby')
+  assert.ok(toLobby.length >= 1)
+  assert.equal(toLobby[toLobby.length - 1].topic, 'Cats')
+
+  // host can now start the new quiz from the lobby
+  manager.startGame('host-1')
+  const q = lastSentTo(sends, 'all')
+  assert.equal(q.type, 'question-started')
+  assert.equal(q.total, 3)
+})
+
+test('updateRoomQuiz rejects outside the lobby and invalid content', () => {
+  let currentTime = NOW
+  const { manager } = makeHarness({ now: () => currentTime })
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(1),
+  })
+  manager.joinRoom('player-1', code, 'Ana')
+  const settings = {
+    topic: 'Cats',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(1),
+  }
+
+  assert.throws(() => manager.updateRoomQuiz('player-1', settings), /host/i)
+  manager.startGame('host-1')
+  // mid-game — can't swap the questions
+  assert.throws(() => manager.updateRoomQuiz('host-1', settings), /lobby/i)
+  // finish the game and go back to the lobby — invalid content is rejected
+  // with the same messages as createRoom/startNextGame
+  manager.nextQuestion('host-1')
+  currentTime = NOW + 3000
+  manager.processAdvances(currentTime)
+  manager.backToLobby('host-1')
+  assert.throws(() => manager.updateRoomQuiz('host-1', { ...settings, questions: [] }), /question/i)
+  assert.throws(() => manager.updateRoomQuiz('host-1', { ...settings, timerSeconds: 0 }), /timer/i)
+  assert.throws(
+    () => manager.updateRoomQuiz('host-1', { ...settings, maxPlayers: 1 }),
+    /participant/i,
+  )
+})
+
 test('backToLobby rejects non-hosts and rooms that are not finished', () => {
   const { manager } = makeHarness()
   const { code } = manager.createRoom('host-1', {

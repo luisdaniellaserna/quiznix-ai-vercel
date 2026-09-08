@@ -443,6 +443,23 @@ export const useGroupStore = defineStore('group', () => {
     send({ type: 'back-to-lobby' })
   }
 
+  /** Host replaces the lobby room's quiz content after changing the setup.
+   * The room stays in the lobby so everyone waits for Start. */
+  function updateRoomQuiz(settings: {
+    topic: string
+    timerSeconds: number
+    maxPlayers: number
+    questions: QuestionFormat[]
+  }) {
+    send({
+      type: 'update-room-quiz',
+      topic: settings.topic,
+      timerSeconds: settings.timerSeconds,
+      maxPlayers: settings.maxPlayers,
+      questions: settings.questions,
+    })
+  }
+
   /** Host commits the new round's topics and questions after restartRoom. */
   function startNextGame(settings: {
     topic: string
@@ -560,6 +577,7 @@ export const useGroupStore = defineStore('group', () => {
     nextQuestion,
     restartRoom,
     backToLobby,
+    updateRoomQuiz,
     startNextGame,
     closeRoom,
     leave,

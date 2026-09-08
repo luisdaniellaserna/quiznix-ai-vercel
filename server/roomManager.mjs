@@ -9,6 +9,31 @@ const PLAYER_GRACE_MS = 90_000
 const HOST_GRACE_MS = 60_000
 const FORCE_REVEAL_MS = 3000
 
+/** Shared validation for host-supplied quiz content (error messages kept stable). */
+function assertValidQuiz({ questions, timerSeconds, maxPlayers }) {
+  const valid =
+    Array.isArray(questions) &&
+    questions.length > 0 &&
+    questions.every(
+      (q) =>
+        typeof q.question === 'string' &&
+        q.question !== '' &&
+        typeof q.correct_answer === 'string' &&
+        q.correct_answer !== '' &&
+        Array.isArray(q.incorrect_answers) &&
+        q.incorrect_answers.length >= 1,
+    )
+  if (!valid) {
+    throw new Error('Invalid question set.')
+  }
+  if (!Number.isFinite(timerSeconds) || timerSeconds <= 0) {
+    throw new Error('Invalid timer setting.')
+  }
+  if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 100) {
+    throw new Error('Max participants must be between 2 and 100.')
+  }
+}
+
 /** Scoreboard entry used by players to see live rank; matches groupProtocol.ts. */
 function buildScoreboard(room) {
   // include the current question's answers too — by the time the scoreboard is
@@ -315,25 +340,7 @@ export class RoomManager {
     if (room.phase !== 'between-rounds') {
       throw new Error('The previous round is not finished.')
     }
-    const valid = Array.isArray(questions) && questions.length > 0 &&
-      questions.every(
-        (q) =>
-          typeof q.question === 'string' &&
-          q.question !== '' &&
-          typeof q.correct_answer === 'string' &&
-          q.correct_answer !== '' &&
-          Array.isArray(q.incorrect_answers) &&
-          q.incorrect_answers.length >= 1,
-      )
-    if (!valid) {
-      throw new Error('Invalid question set.')
-    }
-    if (!Number.isFinite(timerSeconds) || timerSeconds <= 0) {
-      throw new Error('Invalid timer setting.')
-    }
-    if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 100) {
-      throw new Error('Max participants must be between 2 and 100.')
-    }
+    assertValidQuiz({ questions, timerSeconds, maxPlayers })
     room.topic = String(topic ?? '')
     room.timerSeconds = timerSeconds
     room.maxPlayers = maxPlayers
@@ -342,6 +349,32 @@ export class RoomManager {
       player.answers.clear()
     }
     this.startQuestion(room, 0)
+  }
+
+  // Host changed the setup (topic, difficulty, ...) after going back to the
+  // lobby. Replaces the room's quiz content in place — same room code and
+  // roster — and stays in the lobby so the host can Start when ready.
+  updateRoomQuiz(clientId, { topic, timerSeconds, maxPlayers, questions }) {
+    const room = this.roomOfHost(clientId)
+    if (room.phase !== 'lobby') {
+      throw new Error('Questions can only be updated from the lobby.')
+    }
+    assertValidQuiz({ questions, timerSeconds, maxPlayers })
+    room.topic = String(topic ?? '')
+    room.timerSeconds = timerSeconds
+    room.maxPlayers = maxPlayers
+    room.questions = questions
+    room.index = -1
+    room.deadline = 0
+    room.pendingAdvance = null
+    for (const player of room.players.values()) {
+      player.answers.clear()
+    }
+    this.emit(room.code, 'all', {
+      type: 'room-to-lobby',
+      players: this.playersOf(room),
+      topic: room.topic,
+    })
   }
 
   scheduleAdvance(room, delayMs) {
