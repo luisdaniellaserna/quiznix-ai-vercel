@@ -3,6 +3,8 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { useGroupStore } from '../stores/groupStore'
 import { useCountdown } from '../composables/useCountdown'
 import SettingsMenu from './SettingsMenu.vue'
+import ConfettiBurst from './ConfettiBurst.vue'
+import FinalLeaderboard from './FinalLeaderboard.vue'
 
 const emit = defineEmits<{
   leave: []
@@ -88,11 +90,10 @@ const myScoreLine = computed(() => {
   return `${(me.score / 1000).toFixed(1)} pts · ${me.correct} correct so far`
 })
 
-function formatTime(ms: number) {
-  const seconds = Math.round(ms / 1000)
-  const minutes = Math.floor(seconds / 60)
-  return minutes > 0 ? `${minutes}:${String(seconds % 60).padStart(2, '0')}` : `${seconds}s`
-}
+const isWinner = computed(() => {
+  const board = store.leaderboard
+  return !!board?.length && board[0].name === store.playerName
+})
 
 function selectOption(option: string) {
   if (countdown.expired.value || hasSubmitted.value) return
@@ -197,42 +198,8 @@ function done() {
         <div class="card-body">
           <h2 class="text-center text-2xl font-black">🏆 Final scores</h2>
           <p class="text-center font-medium opacity-70">{{ store.topic }}</p>
-          <ul class="mt-4 grid gap-2">
-            <li
-              v-for="(entry, index) in store.leaderboard"
-              :key="entry.name + index"
-              class="flex items-center gap-3 rounded-xl border p-4"
-              :class="
-                entry.name === store.playerName
-                  ? 'border-primary bg-primary/5'
-                  : index === 0
-                    ? 'border-success bg-success/5'
-                    : 'border-base-300'
-              "
-            >
-              <span
-                class="flex h-8 w-8 items-center justify-center rounded-full font-black"
-                :class="
-                  index === 0 ? 'bg-success text-success-content' : 'bg-base-300 text-base-content'
-                "
-              >
-                {{ index + 1 }}
-              </span>
-              <span class="font-bold">
-                {{ entry.name }}
-                <span v-if="entry.name === store.playerName" class="badge badge-primary badge-sm"
-                  >you</span
-                >
-              </span>
-              <span class="ml-auto text-right">
-                <span class="block font-black">{{ (entry.score / 1000).toFixed(1) }} pts</span>
-                <span class="block text-xs opacity-60">
-                  {{ entry.correct }}/{{ entry.total }} correct ·
-                  {{ formatTime(entry.timeSpentMs) }}
-                </span>
-              </span>
-            </li>
-          </ul>
+        <ConfettiBurst v-if="isWinner" />
+          <FinalLeaderboard :entries="store.leaderboard ?? []" :highlight-name="store.playerName" />
           <button class="btn btn-primary mt-4" @click="done">Done</button>
         </div>
       </div>
