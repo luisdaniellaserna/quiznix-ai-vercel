@@ -281,6 +281,13 @@ function playAgain() {
             {{ store.players.length }} / {{ store.maxPlayers }} joined
           </p>
           <TriviaCard :interval-ms="10000" />
+          <p v-if="store.reconnecting" role="status" class="text-sm opacity-70">
+            <span class="loading loading-spinner loading-xs align-middle"></span> Reconnecting…
+          </p>
+          <div v-else-if="store.error" role="alert" class="alert alert-error py-2 text-sm">
+            <span class="min-w-0 flex-1">{{ store.error }}</span>
+            <button class="btn btn-sm btn-outline shrink-0" @click="store.rejoinNow()">Retry</button>
+          </div>
           <div class="w-full text-left">
             <LobbyChat />
           </div>
@@ -308,6 +315,14 @@ function playAgain() {
             >
               {{ countdown.expired.value ? 'time up' : `${countdown.remaining.value}s` }}
             </span>
+          </div>
+          <div v-if="store.reconnecting" role="status" class="alert alert-warning py-2 text-sm">
+            <span class="loading loading-spinner loading-xs"></span>
+            <span>Reconnecting to the room server…</span>
+          </div>
+          <div v-else-if="store.error" role="alert" class="alert alert-error py-2 text-sm">
+            <span class="min-w-0 flex-1">{{ store.error }}</span>
+            <button class="btn btn-sm btn-outline shrink-0" @click="store.rejoinNow()">Retry</button>
           </div>
           <progress
             class="progress progress-primary"

@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useGroupStore } from '../stores/groupStore'
 import { useCountdown } from '../composables/useCountdown'
 import SettingsMenu from './SettingsMenu.vue'
@@ -132,6 +132,51 @@ watch(
     if (val === null) selectedOption.value = null
   },
 )
+
+// keep the player screen awake mid-game like the host — a locked phone kills the WS
+interface ScreenWakeLock {
+  release: () => Promise<void>
+}
+let wakeLock: ScreenWakeLock | null = null
+async function requestWakeLock() {
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLock = await (
+        navigator as unknown as {
+          wakeLock: { request: (t: string) => Promise<ScreenWakeLock> }
+        }
+      ).wakeLock.request('screen')
+    }
+  } catch {}
+}
+function releaseWakeLock() {
+  try {
+    wakeLock?.release()
+  } catch {}
+  wakeLock = null
+}
+watch(
+  () => store.phase,
+  (phase) => {
+    if (phase === 'lobby' || phase === 'question') {
+      void requestWakeLock()
+    } else {
+      releaseWakeLock()
+    }
+  },
+  { immediate: true },
+)
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (
+      document.visibilityState === 'visible' &&
+      (store.phase === 'lobby' || store.phase === 'question')
+    ) {
+      void requestWakeLock()
+    }
+  })
+}
+onUnmounted(() => releaseWakeLock())
 
 const closedDialogRef = ref<HTMLDialogElement | null>(null)
 
@@ -281,6 +326,13 @@ function confirmLeave() {
               👤 {{ player.name }}
             </span>
           </div>
+          <p v-if="store.reconnecting" role="status" class="text-sm opacity-70">
+            <span class="loading loading-spinner loading-xs align-middle"></span> Reconnecting…
+          </p>
+          <div v-else-if="store.error" role="alert" class="alert alert-error py-2 text-sm">
+            <span class="min-w-0 flex-1">{{ store.error }}</span>
+            <button class="btn btn-sm btn-outline shrink-0" @click="store.rejoinNow()">Retry</button>
+          </div>
           <div class="w-full text-left">
             <LobbyChat />
           </div>
@@ -306,6 +358,14 @@ function confirmLeave() {
               >
                 {{ countdown.expired.value ? 'time up' : `${countdown.remaining.value}s` }}
               </span>
+            </div>
+            <div v-if="store.reconnecting" role="status" class="alert alert-warning py-2 text-sm">
+              <span class="loading loading-spinner loading-xs"></span>
+              <span>Reconnecting… your answer will send once you're back.</span>
+            </div>
+            <div v-else-if="store.error" role="alert" class="alert alert-error py-2 text-sm">
+              <span class="min-w-0 flex-1">{{ store.error }}</span>
+              <button class="btn btn-sm btn-outline shrink-0" @click="store.rejoinNow()">Retry</button>
             </div>
             <progress
               class="progress progress-primary"

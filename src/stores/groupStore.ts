@@ -15,6 +15,7 @@ import {
   onEvicted,
   releaseActiveSession,
 } from './groupTabSync'
+import { decideSend, openBurst, rejoinMessageFor } from './reconnectPolicy'
 
 export type GroupRole = 'none' | 'host' | 'player'
 export type GroupPhase = 'idle' | 'connecting' | 'lobby' | 'question' | 'finished' | 'closed'
@@ -41,6 +42,7 @@ export const useGroupStore = defineStore('group', () => {
   let reconnectAttempts = 0
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let shouldReconnect = true
+  const reconnecting = ref(false)
 
   const role = ref<GroupRole>('none')
   const phase = ref<GroupPhase>('idle')
@@ -164,13 +166,29 @@ export const useGroupStore = defineStore('group', () => {
   const UNREACHABLE_MESSAGE = `Cannot reach the room server at ${roomServerUrl()}. Start it with \`npm run dev:all\` (or \`npm run server\`), then try again.`
 
   function send(message: GroupClientMessage) {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify(message))
-    } else if (socket && socket.readyState === WebSocket.CONNECTING) {
-      // first message is sent while the socket is still opening
-      pending.push(message)
-    } else {
-      close(UNREACHABLE_MESSAGE)
+    const state =
+      socket && socket.readyState === WebSocket.OPEN
+        ? 'open'
+        : socket && socket.readyState === WebSocket.CONNECTING
+          ? 'connecting'
+          : 'down'
+    switch (decideSend(state, shouldReconnect, phase.value)) {
+      case 'send':
+        socket?.send(JSON.stringify(message))
+        return
+      case 'queue-redial':
+        // Mid-game taps while the socket is down wait for the redial instead
+        // of killing the session.
+        pending.push(message)
+        connect()
+        return
+      case 'queue':
+        // first message is sent while the socket is still opening
+        pending.push(message)
+        return
+      case 'close':
+        close(UNREACHABLE_MESSAGE)
+        return
     }
   }
 
@@ -181,6 +199,7 @@ export const useGroupStore = defineStore('group', () => {
     const delay = Math.min(base, 30000) + Math.random() * 500
     console.log(`[group] disconnected — reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts + 1})`)
     reconnectAttempts++
+    reconnecting.value = true
     if (reconnectTimer) clearTimeout(reconnectTimer)
     reconnectTimer = setTimeout(() => connect(), delay)
   }
@@ -197,23 +216,14 @@ export const useGroupStore = defineStore('group', () => {
     socket.onopen = () => {
       console.log('[group] connected')
       reconnectAttempts = 0
-      const queued = pending.splice(0)
-      for (const message of queued) {
+      reconnecting.value = false
+      // auto-rejoin on reconnect (screen-off / background grace) using stored
+      // session — the rejoin goes first so queued answers land on a known slot
+      const rejoin = shouldReconnect
+        ? rejoinMessageFor(loadSession(), phase.value, playerName.value)
+        : null
+      for (const message of openBurst(rejoin, pending.splice(0))) {
         socket?.send(JSON.stringify(message))
-      }
-      // auto-rejoin on reconnect (screen-off / background grace) using stored session
-      if (queued.length === 0 && shouldReconnect) {
-        const sess = loadSession()
-        if (sess && sess.code && sess.role === 'player' && sess.playerId) {
-          // only rejoin if we are still in a game that expects it
-          if (phase.value === 'lobby' || phase.value === 'question' || phase.value === 'connecting') {
-            socket?.send(JSON.stringify({ type: 'rejoin', code: sess.code, playerId: sess.playerId, name: sess.playerName || playerName.value }))
-          }
-        } else if (sess && sess.code && sess.role === 'host') {
-          if (phase.value === 'lobby' || phase.value === 'question' || phase.value === 'connecting') {
-            socket?.send(JSON.stringify({ type: 'rejoinHost', code: sess.code }))
-          }
-        }
       }
     }
     socket.onmessage = (event) => handle(JSON.parse(event.data) as GroupServerMessage)
@@ -380,11 +390,13 @@ export const useGroupStore = defineStore('group', () => {
     closedMessage.value = ''
     error.value = ''
     evictedMessage.value = ''
+    reconnecting.value = false
     // do not clear shouldReconnect here — leave() / close() handle it; createRoom/joinRoom reset it
   }
 
   function close(message: string) {
     shouldReconnect = false
+    reconnecting.value = false
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
@@ -395,6 +407,22 @@ export const useGroupStore = defineStore('group', () => {
     closedMessage.value = message
   }
 
+  /** Manual retry after a failed (re)join: re-sends the stored rejoin on the
+   * live socket, or redials when the socket is down. */
+  function rejoinNow() {
+    if (!shouldReconnect) return
+    error.value = ''
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const rejoin = rejoinMessageFor(loadSession(), phase.value, playerName.value)
+      if (rejoin) {
+        socket.send(JSON.stringify(rejoin))
+        return
+      }
+    }
+    reconnectAttempts = 0
+    connect()
+  }
+
   function createRoom(settings: {
     topic: string
     questions: QuestionFormat[]
@@ -403,6 +431,10 @@ export const useGroupStore = defineStore('group', () => {
   }) {
     reset()
     shouldReconnect = true
+    // a deliberate join supersedes any stored session/queue: without this the
+    // redial would rejoin the old room first and then create a second slot
+    clearSession()
+    pending = []
     reconnectAttempts = 0
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
@@ -427,6 +459,11 @@ export const useGroupStore = defineStore('group', () => {
   function joinRoom(code: string, name: string) {
     reset()
     shouldReconnect = true
+    // a deliberate join supersedes any stored session/queue: without this the
+    // redial would rejoin the old slot first and the flushed join would mint
+    // a duplicate roster entry for the same user
+    clearSession()
+    pending = []
     reconnectAttempts = 0
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
@@ -523,6 +560,7 @@ export const useGroupStore = defineStore('group', () => {
 
   function leave() {
     shouldReconnect = false
+    reconnecting.value = false
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
@@ -552,6 +590,7 @@ export const useGroupStore = defineStore('group', () => {
     }
     pending = []
     shouldReconnect = false
+    reconnecting.value = false
     clearSession()
     releaseActiveSession()
     phase.value = 'closed'
@@ -610,6 +649,8 @@ export const useGroupStore = defineStore('group', () => {
     closedMessage,
     error,
     evictedMessage,
+    reconnecting,
+    rejoinNow,
     getBlockingSession,
     forceTakeover,
     checkRoomConflict,
