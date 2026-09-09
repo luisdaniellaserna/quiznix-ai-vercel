@@ -13,6 +13,7 @@ import {
   evictOtherTab,
   getBlockingSession,
   onEvicted,
+  randomId,
   releaseActiveSession,
 } from './groupTabSync'
 import { decideSend, openBurst, rejoinMessageFor, shouldAutoResume } from './reconnectPolicy'
@@ -577,7 +578,7 @@ export const useGroupStore = defineStore('group', () => {
   function sendChat(text: string) {
     const trimmed = text.trim().slice(0, MAX_CHAT_LENGTH)
     if (!trimmed) return
-    send({ type: 'chat', id: crypto.randomUUID(), text: trimmed })
+    send({ type: 'chat', id: randomId(), text: trimmed })
   }
 
   function nextQuestion() {

@@ -30,10 +30,40 @@ export interface ActiveGroupSession {
   lastSeen: number
 }
 
+/**
+ * UUID v4 without requiring a secure context. `crypto.randomUUID` is undefined
+ * over plain-HTTP LAN play (how phones join a room), so fall back to
+ * `getRandomValues` (available in insecure contexts) and `Math.random` last.
+ * The optional source parameter exists for tests.
+ */
+export interface RandomSource {
+  randomUUID?: () => string
+  getRandomValues?: (array: Uint8Array) => void
+}
+
+export function randomId(source?: RandomSource): string {
+  const c = source ?? (globalThis as { crypto?: RandomSource }).crypto
+  if (typeof c?.randomUUID === 'function') {
+    return c.randomUUID()
+  }
+  const bytes = new Uint8Array(16)
+  if (typeof c?.getRandomValues === 'function') {
+    c.getRandomValues(bytes)
+  } else {
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = Math.floor(Math.random() * 256)
+    }
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 function ensureTabId(): string {
   let id = sessionStorage.getItem(TAB_ID_KEY)
   if (!id) {
-    id = `tab-${crypto.randomUUID()}`
+    id = `tab-${randomId()}`
     try {
       sessionStorage.setItem(TAB_ID_KEY, id)
     } catch {

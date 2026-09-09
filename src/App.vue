@@ -13,6 +13,7 @@ import { buildQuizPrompt } from './prompts'
 import { computeScore } from './scoring'
 import { parseJsonResponse } from './jsonParse'
 import { useGroupStore } from './stores/groupStore'
+import { randomId } from './stores/groupTabSync'
 
 const apiKey = import.meta.env.VITE_DEEPSEEK_API_KEY
 
@@ -327,7 +328,7 @@ async function generateQuestions(topics: string[], mode: Mode, count: number): P
   const history = loadQuestionHistory()
   const recent = history.slice(-QUESTION_EXCLUDE_LIMIT)
   const known = new Set(history.map(normalizeQuestion))
-  const variationSeed = crypto.randomUUID().slice(0, 8)
+  const variationSeed = randomId().slice(0, 8)
   const initial = await deepseekMain(topics, mode, count, recent, variationSeed)
   // Never re-ask a question from a previous quiz, even if the model ignored
   // the exclusion list — treat repeats as missing and fetch replacements.
