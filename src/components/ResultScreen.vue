@@ -42,6 +42,9 @@ const percentage = computed(() =>
           <span class="opacity-70">Correct answer: </span>
           <span class="text-success">{{ userAnswer.question.correct_answer }}</span>
         </p>
+        <p v-if="userAnswer.answer !== userAnswer.question.correct_answer && userAnswer.question.explanation" class="text-sm opacity-80">
+          {{ userAnswer.question.explanation }}
+        </p>
       </div>
     </div>
 
