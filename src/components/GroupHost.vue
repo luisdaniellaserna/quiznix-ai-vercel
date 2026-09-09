@@ -211,7 +211,7 @@ function playAgain() {
       <div class="navbar-end gap-2">
         <button
           v-if="store.phase === 'lobby' || store.phase === 'question'"
-          class="btn btn-ghost btn-sm"
+          class="btn btn-error btn-outline btn-sm"
           @click="requestExit"
         >
           Exit
@@ -325,8 +325,10 @@ function playAgain() {
               >
                 🚀 Start game ({{ store.readyCount }}/{{ store.players.length }} ready)
               </button>
-              <button class="btn btn-outline" @click="emit('edit-setup')">Edit setup</button>
-              <button class="btn btn-ghost" @click="requestExit">Exit</button>
+              <button class="btn btn-warning btn-outline" @click="emit('edit-setup')">
+                Edit setup
+              </button>
+              <button class="btn btn-error btn-outline" @click="requestExit">Exit</button>
             </div>
           </div>
         </div>
@@ -443,7 +445,7 @@ function playAgain() {
           </div>
 
           <div class="flex items-center justify-between gap-2">
-            <button class="btn btn-ghost btn-sm" @click="requestExit">Exit quiz</button>
+            <button class="btn btn-error btn-outline btn-sm" @click="requestExit">Exit quiz</button>
             <span v-if="!canAdvance" class="text-sm opacity-60">Waiting for answers…</span>
             <button class="btn btn-primary ml-auto" :disabled="!canAdvance" @click="next">
               {{ isLastQuestion ? 'See results' : 'Next question' }}
