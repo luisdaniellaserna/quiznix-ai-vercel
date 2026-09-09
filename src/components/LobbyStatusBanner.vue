@@ -54,26 +54,10 @@ const label = computed(() => {
       return 'Waiting for the host to start the game…'
   }
 })
-
-const badgeClass = computed(() => {
-  switch (props.status) {
-    case 'generating':
-      return 'badge-warning'
-    case 'choosing-topic':
-      return 'badge-info'
-    case 'countdown':
-      return 'badge-error'
-    case 'started':
-      return 'badge-success'
-    default:
-      return 'badge-neutral'
-  }
-})
 </script>
 
 <template>
   <div class="alert py-2" :class="status === 'countdown' ? 'alert-error' : 'alert-info'">
-    <span class="badge badge-sm" :class="badgeClass">{{ quizReady ? status : 'generating' }}</span>
     <span class="text-sm font-medium">{{ label }}</span>
   </div>
   <div v-if="hostOnline === false" class="alert alert-warning py-2">

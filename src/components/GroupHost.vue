@@ -8,7 +8,6 @@ import FinalLeaderboard from './FinalLeaderboard.vue'
 import LobbyChat from './LobbyChat.vue'
 import ConnectionBanner from './ConnectionBanner.vue'
 import LobbyRoster from './LobbyRoster.vue'
-import LobbyStatusBanner from './LobbyStatusBanner.vue'
 import CountdownOverlay from './CountdownOverlay.vue'
 import TriviaCard from './TriviaCard.vue'
 
@@ -288,16 +287,6 @@ function playAgain() {
             <div class="w-full">
               <ConnectionBanner />
             </div>
-            <div class="w-full">
-              <LobbyStatusBanner
-                :status="store.hostStatus"
-                :detail="store.hostDetail"
-                :topic="store.topic"
-                :quiz-ready="store.quizReady"
-                :host-online="store.hostOnline"
-                :host-offline-expires-at="store.hostOfflineExpiresAt"
-              />
-            </div>
             <p class="max-w-md text-sm opacity-70">
               Players open Quiznix AI on their gadgets, enter this code and their name to join.
             </p>
@@ -356,16 +345,6 @@ function playAgain() {
           <div class="card-body items-center gap-4 text-center">
             <div class="w-full">
               <ConnectionBanner />
-            </div>
-            <div class="w-full">
-              <LobbyStatusBanner
-                status="countdown"
-                :detail="''"
-                :topic="store.topic"
-                :quiz-ready="store.quizReady"
-                :host-online="store.hostOnline"
-                :host-offline-expires-at="store.hostOfflineExpiresAt"
-              />
             </div>
             <p class="text-sm opacity-70">Game starting — countdown is live for players.</p>
             <div class="w-full text-left">
