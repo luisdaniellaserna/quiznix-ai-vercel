@@ -352,7 +352,7 @@ function confirmLeave() {
               <LobbyChat />
             </div>
             <TriviaCard :interval-ms="10000" />
-            <button class="btn btn-ghost" @click="requestLeave">Leave lobby</button>
+            <button class="btn btn-error btn-outline" @click="requestLeave">Leave lobby</button>
           </div>
         </div>
         <aside class="w-full lg:w-80 lg:shrink-0">
