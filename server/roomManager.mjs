@@ -127,12 +127,49 @@ export class RoomManager {
     return { code }
   }
 
+  /** Current-question snapshot so (re)joiners mid-game can play immediately. */
+  syncQuestionTo(room, playerId, clientId) {
+    this.emit(room.code, playerId, {
+      type: 'question-started',
+      index: room.index,
+      total: room.questions.length,
+      question: room.questions[room.index].question,
+      options: this.optionsOf(room, room.index),
+      timerSeconds: room.timerSeconds,
+      deadline: room.deadline,
+      correctAnswer: room.questions[room.index].correct_answer,
+      scoreboard: buildScoreboard(room),
+    }, clientId)
+  }
+
   joinRoom(clientId, code, name) {
     const room = this.rooms.get(String(code).trim().toUpperCase())
     if (!room) {
       throw new Error('Room not found. Check the code and try again.')
     }
-    if (room.phase !== 'lobby') {
+    // Idempotent retry: this socket already holds a slot here (auto-rejoin
+    // followed by the flushed join after a refresh, double-tapped Join,
+    // lost-response retry). Minting another would duplicate the same user.
+    const existing = this.playerRooms.get(clientId)
+    if (existing && existing.code === room.code) {
+      const held = room.players.get(existing.playerId)
+      if (held) {
+        held.clientId = clientId
+        held.disconnectedAt = null
+        const players = this.playersOf(room)
+        this.emit(room.code, existing.playerId, { type: 'joined', playerId: existing.playerId, name: held.name, roomCode: room.code, players }, clientId)
+        this.broadcastRoster(room)
+        if (room.phase === 'question') {
+          this.syncQuestionTo(room, existing.playerId, clientId)
+        } else if (room.phase === 'finished') {
+          this.emit(room.code, existing.playerId, { type: 'game-finished', leaderboard: this.leaderboard(room) }, clientId)
+        }
+        return { code: room.code, playerId: existing.playerId }
+      }
+    }
+    // Late joiners are admitted while a question is running (missed questions
+    // score nothing) so a dropped player can always come back mid-game.
+    if (room.phase !== 'lobby' && room.phase !== 'question') {
       throw new Error('The game has already started.')
     }
     const trimmed = String(name ?? '').trim()
@@ -153,17 +190,7 @@ export class RoomManager {
         this.emit(room.code, pid, { type: 'joined', playerId: pid, name: p.name, roomCode: room.code, players }, clientId)
         this.broadcastRoster(room)
         if (room.phase === 'question') {
-          this.emit(room.code, pid, {
-            type: 'question-started',
-            index: room.index,
-            total: room.questions.length,
-            question: room.questions[room.index].question,
-            options: this.optionsOf(room, room.index),
-            timerSeconds: room.timerSeconds,
-            deadline: room.deadline,
-            correctAnswer: room.questions[room.index].correct_answer,
-            scoreboard: buildScoreboard(room),
-          }, clientId)
+          this.syncQuestionTo(room, pid, clientId)
         }
         return { code: room.code, playerId: pid }
       }
@@ -183,6 +210,9 @@ export class RoomManager {
       clientId,
     )
     this.broadcastRoster(room)
+    if (room.phase === 'question') {
+      this.syncQuestionTo(room, playerId, clientId)
+    }
     return { code: room.code, playerId }
   }
 
@@ -489,11 +519,12 @@ export class RoomManager {
     const trimmedName = String(name ?? '').trim()
     // try by playerId first (most secure)
     let player = room.players.get(playerId)
+    if (player?.clientId === null && player.disconnectedAt != null && this.now() - player.disconnectedAt > PLAYER_GRACE_MS) {
+      // slot expired — drop it and fall through to the late-join path below
+      room.players.delete(playerId)
+      player = undefined
+    }
     if (player && player.clientId === null) {
-      if (player.disconnectedAt != null && this.now() - player.disconnectedAt > PLAYER_GRACE_MS) {
-        room.players.delete(playerId)
-        throw new Error('Rejoin grace period expired. Please join as new player.')
-      }
       player.clientId = clientId
       player.disconnectedAt = null
       if (trimmedName) player.name = trimmedName
@@ -503,17 +534,7 @@ export class RoomManager {
       this.broadcastRoster(room)
       // sync current question if game in progress
       if (room.phase === 'question') {
-        this.emit(roomCode, playerId, {
-          type: 'question-started',
-          index: room.index,
-          total: room.questions.length,
-          question: room.questions[room.index].question,
-          options: this.optionsOf(room, room.index),
-          timerSeconds: room.timerSeconds,
-          deadline: room.deadline,
-          correctAnswer: room.questions[room.index].correct_answer,
-          scoreboard: buildScoreboard(room),
-        }, clientId)
+        this.syncQuestionTo(room, playerId, clientId)
       } else if (room.phase === 'finished') {
         this.emit(roomCode, playerId, { type: 'game-finished', leaderboard: this.leaderboard(room) }, clientId)
       }
@@ -533,24 +554,35 @@ export class RoomManager {
         this.emit(roomCode, pid, { type: 'joined', playerId: pid, name: p.name, roomCode, players }, clientId)
         this.broadcastRoster(room)
         if (room.phase === 'question') {
-          this.emit(roomCode, pid, {
-            type: 'question-started',
-            index: room.index,
-            total: room.questions.length,
-            question: room.questions[room.index].question,
-            options: this.optionsOf(room, room.index),
-            timerSeconds: room.timerSeconds,
-            deadline: room.deadline,
-            correctAnswer: room.questions[room.index].correct_answer,
-            scoreboard: buildScoreboard(room),
-          }, clientId)
+          this.syncQuestionTo(room, pid, clientId)
         } else if (room.phase === 'finished') {
           this.emit(roomCode, pid, { type: 'game-finished', leaderboard: this.leaderboard(room) }, clientId)
         }
         return { code: roomCode, playerId: pid }
       }
     }
-    throw new Error('No pending slot for rejoin. Please join as new player with a different code.')
+    // No slot to reclaim (grace expired or entry swept): admit as a late
+    // joiner while the game is still running so a mid-game drop always has a
+    // way back in. Missed questions score nothing.
+    if (room.phase === 'finished') {
+      throw new Error('The game has already started.')
+    }
+    if (trimmedName === '' || trimmedName.length > MAX_NAME_LENGTH) {
+      throw new Error('No pending slot for rejoin. Please join as new player.')
+    }
+    if (room.players.size >= room.maxPlayers) {
+      throw new Error('This room is full.')
+    }
+    const lateId = `p-${++this.playerSeq}`
+    room.players.set(lateId, { clientId, name: trimmedName, answers: new Map(), disconnectedAt: null })
+    this.playerRooms.set(clientId, { code: roomCode, playerId: lateId })
+    const latePlayers = this.playersOf(room)
+    this.emit(roomCode, lateId, { type: 'joined', playerId: lateId, name: trimmedName, roomCode, players: latePlayers }, clientId)
+    this.broadcastRoster(room)
+    if (room.phase === 'question') {
+      this.syncQuestionTo(room, lateId, clientId)
+    }
+    return { code: roomCode, playerId: lateId }
   }
 
   sweep(nowMs = this.now()) {

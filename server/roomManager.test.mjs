@@ -434,8 +434,11 @@ test('player disconnect keeps 90s grace and allows same-name reclaim', () => {
   m2b.sweep(now)
   assert.equal(m2b.rooms.get(code2).players.has(ben2), true)
   assert.equal(m2b.rooms.get(code2).players.size, 1)
-  assert.throws(() => m2b.rejoin('player-1', code2, ana, 'Ana'), /No pending slot|grace/i)
-  // after sweep, startGame works with remaining player
+  // an expired slot degrades to a fresh late-join slot instead of locking out
+  const late = m2b.rejoin('player-1c', code2, ana, 'Ana')
+  assert.notEqual(late.playerId, ana)
+  assert.equal(m2b.rooms.get(code2).players.size, 2)
+  // after sweep, startGame works with remaining players
   m2b.startGame('host-1')
   assert.equal(m2b.rooms.get(code2).phase, 'question')
 })
@@ -895,4 +898,174 @@ test('sendChat rejects blank/overlong text, strangers, and non-lobby phases', ()
   manager.startGame('host-1')
   // no answer-sharing once questions are live
   assert.throws(() => manager.sendChat('player-1', { id: 'm4', text: 'hi' }), /lobby/i)
+})
+
+test('late join during a question is admitted and synced to the current question', () => {
+  const { manager, sends } = makeHarness()
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(1),
+  })
+  const ana = manager.joinRoom('player-1', code, 'Ana').playerId
+  manager.startGame('host-1')
+
+  const { playerId: cal } = manager.joinRoom('player-9', code, 'Cal')
+  assert.deepEqual(lastSentTo(sends, cal), {
+    type: 'question-started',
+    index: 0,
+    total: 1,
+    question: 'Q1',
+    options: ['A', 'B', 'D', 'C'],
+    timerSeconds: TIMER,
+    deadline: NOW + TIMER * 1000,
+    correctAnswer: 'C',
+    scoreboard: [
+      { playerId: ana, name: 'Ana', score: 0, correct: 0 },
+      { playerId: cal, name: 'Cal', score: 0, correct: 0 },
+    ],
+  })
+
+  // the late joiner can answer the live question; missed questions score 0
+  manager.submitAnswer('player-9', 'C')
+  manager.submitAnswer('player-1', 'A')
+  manager.nextQuestion('host-1')
+  assert.deepEqual(lastSentTo(sends, 'all'), {
+    type: 'game-finished',
+    leaderboard: [
+      { name: 'Cal', score: 10000, correct: 1, total: 1, timeSpentMs: 0 },
+      { name: 'Ana', score: 0, correct: 0, total: 1, timeSpentMs: 0 },
+    ],
+  })
+})
+
+test('rejoin after grace expiry degrades to a fresh slot mid-game', () => {
+  let now = NOW
+  const { manager, sends } = makeHarness({ now: () => now })
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  const ana = manager.joinRoom('player-1', code, 'Ana').playerId
+  manager.joinRoom('player-2', code, 'Ben')
+  manager.startGame('host-1')
+
+  manager.playerDisconnected('player-1')
+  now += 91_000
+  manager.sweep(now)
+
+  // previously threw 'No pending slot...' / 'grace period expired' — unrecoverable
+  const late = manager.rejoin('player-1b', code, ana, 'Ana')
+  assert.notEqual(late.playerId, ana)
+  assert.equal(lastSentTo(sends, late.playerId).type, 'question-started')
+  // the 91s jump blew past the old deadline, so the host moves on, then play continues
+  manager.nextQuestion('host-1')
+  assert.equal(lastSentTo(sends, 'all').type, 'question-started')
+  manager.submitAnswer('player-1b', 'C')
+  assert.equal(manager.rooms.get(code).players.get(late.playerId).name, 'Ana')
+})
+
+test('late join and degraded rejoin are still rejected when finished, full, or nameless', () => {
+  const { manager } = makeHarness()
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(1),
+  })
+  manager.joinRoom('player-1', code, 'Ana')
+  manager.startGame('host-1')
+  manager.submitAnswer('player-1', 'C')
+  manager.nextQuestion('host-1')
+  assert.equal(manager.rooms.get(code).phase, 'finished')
+  assert.throws(() => manager.joinRoom('player-9', code, 'Cal'), /already started/i)
+  assert.throws(() => manager.rejoin('player-9', code, 'p-999', 'Cal'), /already started/i)
+
+  let now = NOW
+  const full = makeHarness({ now: () => now })
+  const { code: fullCode } = full.manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 2,
+    questions: makeQuestions(2),
+  })
+  full.manager.joinRoom('player-1', fullCode, 'Ana')
+  full.manager.joinRoom('player-2', fullCode, 'Ben')
+  full.manager.startGame('host-1')
+  assert.throws(() => full.manager.joinRoom('player-9', fullCode, 'Cal'), /full/i)
+  assert.throws(() => full.manager.rejoin('player-9', fullCode, 'p-999', 'Zed'), /full/i)
+
+  const { manager: nameless } = makeHarness()
+  const { code: namelessCode } = nameless.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  nameless.joinRoom('player-1', namelessCode, 'Ana')
+  nameless.startGame('host-1')
+  assert.throws(() => nameless.rejoin('player-9', namelessCode, 'p-999', '   '), /pending slot/i)
+})
+
+test('joinRoom on the same socket is idempotent (no duplicate on retry)', () => {
+  const { manager } = makeHarness()
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  const first = manager.joinRoom('player-1', code, 'Ana')
+  const retry = manager.joinRoom('player-1', code, 'Ana')
+  assert.equal(retry.playerId, first.playerId)
+  assert.equal(manager.rooms.get(code).players.size, 1)
+  // same once the game is running
+  manager.startGame('host-1')
+  const retryMidGame = manager.joinRoom('player-1', code, 'Ana')
+  assert.equal(retryMidGame.playerId, first.playerId)
+  assert.equal(manager.rooms.get(code).players.size, 1)
+})
+
+test('refresh then manual join does not duplicate after auto-rejoin', () => {
+  const { manager } = makeHarness()
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  const ana = manager.joinRoom('ws-1', code, 'ngek').playerId
+  manager.joinRoom('ws-ben', code, 'Ben')
+  manager.startGame('host-1')
+  // refresh: old socket drops, the new socket auto-rejoins, then the flushed
+  // manual join arrives on that same socket — must reuse p-1, not mint p-2
+  manager.playerDisconnected('ws-1')
+  const rejoined = manager.rejoin('ws-2', code, ana, 'ngek')
+  assert.equal(rejoined.playerId, ana)
+  const again = manager.joinRoom('ws-2', code, 'ngek')
+  assert.equal(again.playerId, ana)
+  assert.equal(manager.rooms.get(code).players.size, 2)
+  const names = manager.playersOf(manager.rooms.get(code)).map((p) => p.name)
+  assert.deepEqual(names.sort(), ['Ben', 'ngek'])
+})
+
+test('mid-game same-name join from a new socket still reclaims the grace slot', () => {
+  const { manager } = makeHarness()
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  const ana = manager.joinRoom('ws-1', code, 'ngek').playerId
+  manager.joinRoom('ws-ben', code, 'Ben')
+  manager.startGame('host-1')
+  manager.playerDisconnected('ws-1')
+  // no rejoin this time: the manual join alone must reclaim, not duplicate
+  const reclaimed = manager.joinRoom('ws-3', code, 'ngek')
+  assert.equal(reclaimed.playerId, ana)
+  assert.equal(manager.rooms.get(code).players.size, 2)
 })
