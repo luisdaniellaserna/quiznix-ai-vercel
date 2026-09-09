@@ -1,7 +1,12 @@
 <script lang="ts" setup>
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { MODE_CONFIG, type GameMode, type Mode } from '../quizConfig'
 import SettingsMenu from './SettingsMenu.vue'
+import { prefetchUselessFact } from '../composables/useUselessFact'
+
+// Warm the trivia cache while the user fills the form, so the loading screen
+// opens with a fresh fact and shows it stably (no mid-read swap).
+onMounted(() => prefetchUselessFact())
 
 const emit = defineEmits<{
   'start-quiz': [
@@ -539,7 +544,7 @@ function start() {
           <!-- setup form -->
           <form class="grid gap-5 p-6 sm:p-10" @submit.prevent="start" @keydown.enter.prevent>
             <div>
-              <label class="label text-base font-semibold text-base-content">Topic</label>
+              <label class="label text-base font-semibold text-base-content">Topic/s</label>
               <div class="flex flex-col sm:flex-row gap-2">
                 <input
                   v-model="topic"
