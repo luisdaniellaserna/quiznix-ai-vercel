@@ -17,7 +17,27 @@ import {
 } from './groupTabSync'
 
 export type GroupRole = 'none' | 'host' | 'player'
-export type GroupPhase = 'idle' | 'connecting' | 'lobby' | 'question' | 'finished' | 'closed'
+export type GroupPhase =
+  | 'idle'
+  | 'connecting'
+  | 'lobby'
+  | 'starting'
+  | 'question'
+  | 'finished'
+  | 'closed'
+export type ConnectionState = 'online' | 'reconnecting' | 'failed'
+export interface ResumeOffer {
+  code: string
+  name: string
+  role: 'host' | 'player'
+  savedAt: number
+}
+export type HostStatus =
+  | 'choosing-topic'
+  | 'generating'
+  | 'waiting-to-start'
+  | 'countdown'
+  | 'started'
 
 /** The WebSocket URL of the room server, as configured or derived from the page host. */
 export function roomServerUrl() {
@@ -65,6 +85,20 @@ export const useGroupStore = defineStore('group', () => {
   const answeredCount = ref(0)
   const totalPlayers = ref(0)
   const leaderboard = ref<LeaderboardEntry[] | null>(null)
+  const quizReady = ref(true)
+  const hostStatus = ref<HostStatus>('waiting-to-start')
+  const hostDetail = ref('')
+  const hostOnline = ref(true)
+  const hostOfflineExpiresAt = ref(0)
+  const startingDeadline = ref<number | null>(null)
+  const connection = ref<ConnectionState>('online')
+  const serverOffsetMs = ref(0)
+  const myReady = computed(() => {
+    if (!playerId.value) return false
+    return players.value.find((p) => p.playerId === playerId.value)?.ready ?? false
+  })
+  const readyCount = computed(() => players.value.filter((p) => p.ready).length)
+  const allReady = computed(() => players.value.length > 0 && players.value.every((p) => p.ready))
   // Lobby group chat. The server only relays messages — every client keeps its
   // own copy in localStorage so a refresh restores the visible history.
   const chatMessages = ref<ChatMessage[]>([])
@@ -73,8 +107,109 @@ export const useGroupStore = defineStore('group', () => {
   const evictedMessage = ref('')
 
   const STORAGE_KEY = 'quiznix-group'
+  const RESUME_TTL_FALLBACK_MS = 5 * 60 * 1000
   const MAX_CHAT_MESSAGES = 100
   const MAX_CHAT_LENGTH = 200
+  const KEEPALIVE_MS = 20_000
+  const MAX_RECONNECT_ATTEMPTS = 5
+
+  function resumeStorageKey(code: string) {
+    return `quiznix-resume-${code.trim().toUpperCase()}`
+  }
+
+  interface ResumeRecord {
+    playerId: string | null
+    name: string
+    role: 'host' | 'player'
+    secret: string
+    savedAt: number
+    ttlMs: number
+  }
+
+  /** Crash-proof mirror of the seat secret (sessionStorage dies with the tab). */
+  function saveSeat(secret: string, ttlMs: number) {
+    if (!roomCode.value || !secret) return
+    const r = role.value
+    if (r !== 'host' && r !== 'player') return
+    persistSession(secret, ttlMs)
+    try {
+      const mirror: ResumeRecord = {
+        playerId: playerId.value,
+        name: r === 'host' ? 'Host' : playerName.value,
+        role: r,
+        secret,
+        savedAt: Date.now(),
+        ttlMs: ttlMs > 0 ? ttlMs : RESUME_TTL_FALLBACK_MS,
+      }
+      localStorage.setItem(resumeStorageKey(roomCode.value), JSON.stringify(mirror))
+    } catch {}
+  }
+
+  function clearResume(code?: string) {
+    try {
+      sessionStorage.removeItem(STORAGE_KEY)
+      const target = code ?? roomCode.value
+      if (target) localStorage.removeItem(resumeStorageKey(target))
+    } catch {}
+  }
+
+  function loadResumeRecord(): (ResumeRecord & { code: string }) | null {
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw) as ResumeRecord & { code: string }
+        if (parsed.code && parsed.secret) return parsed
+      }
+    } catch {}
+    return null
+  }
+
+  function resumeFresh(record: { savedAt: number; ttlMs: number }) {
+    return Date.now() - record.savedAt < (record.ttlMs > 0 ? record.ttlMs : RESUME_TTL_FALLBACK_MS)
+  }
+
+  /** One-tap "Resume as Ana?" offer for the join screens. Null when stale/absent. */
+  function getResumeOffer(code?: string): ResumeOffer | null {
+    try {
+      const keys: string[] = []
+      if (code) {
+        keys.push(resumeStorageKey(code))
+      } else {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i)
+          if (key && key.startsWith('quiznix-resume-')) keys.push(key)
+        }
+      }
+      let best: (ResumeRecord & { code: string }) | null = null
+      for (const key of keys) {
+        const raw = localStorage.getItem(key)
+        if (!raw) continue
+        try {
+          const parsed = JSON.parse(raw) as ResumeRecord
+          if (!parsed.secret || !resumeFresh(parsed)) {
+            try {
+              localStorage.removeItem(key)
+            } catch {}
+            continue
+          }
+          const record = { ...parsed, code: key.slice('quiznix-resume-'.length) }
+          if (!best || record.savedAt > best.savedAt) best = record
+        } catch {}
+      }
+      if (!best) return null
+      return { code: best.code, name: best.name, role: best.role, savedAt: best.savedAt }
+    } catch {
+      return null
+    }
+  }
+
+  function discardResume(code: string) {
+    try {
+      localStorage.removeItem(resumeStorageKey(code))
+    } catch {}
+    const sess = loadResumeRecord()
+    if (sess && sess.code === code.trim().toUpperCase()) clearResume(code)
+  }
 
   function chatStorageKey(code: string) {
     return `quiznix-chat-${code}`
@@ -131,8 +266,9 @@ export const useGroupStore = defineStore('group', () => {
     return idx === -1 ? 0 : idx + 1
   })
 
-  function persistSession() {
+  function persistSession(secret?: string, ttlMs?: number) {
     try {
+      const prev = loadSession()
       sessionStorage.setItem(
         STORAGE_KEY,
         JSON.stringify({
@@ -143,6 +279,9 @@ export const useGroupStore = defineStore('group', () => {
           topic: topic.value,
           hostQuestions: hostQuestions.value,
           maxPlayers: maxPlayers.value,
+          secret: secret ?? prev?.secret ?? '',
+          ttlMs: ttlMs ?? prev?.ttlMs ?? RESUME_TTL_FALLBACK_MS,
+          savedAt: Date.now(),
         }),
       )
     } catch {}
@@ -152,7 +291,14 @@ export const useGroupStore = defineStore('group', () => {
       sessionStorage.removeItem(STORAGE_KEY)
     } catch {}
   }
-  function loadSession(): { code: string; playerId: string | null; playerName: string; role: GroupRole } | null {
+  function loadSession(): {
+    code: string
+    playerId: string | null
+    playerName: string
+    role: GroupRole
+    secret?: string
+    ttlMs?: number
+  } | null {
     try {
       const raw = sessionStorage.getItem(STORAGE_KEY)
       return raw ? JSON.parse(raw) : null
@@ -163,30 +309,80 @@ export const useGroupStore = defineStore('group', () => {
 
   const UNREACHABLE_MESSAGE = `Cannot reach the room server at ${roomServerUrl()}. Start it with \`npm run dev:all\` (or \`npm run server\`), then try again.`
 
+  function activePhase() {
+    return (
+      phase.value === 'connecting' ||
+      phase.value === 'lobby' ||
+      phase.value === 'starting' ||
+      phase.value === 'question'
+    )
+  }
+
   function send(message: GroupClientMessage) {
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify(message))
-    } else if (socket && socket.readyState === WebSocket.CONNECTING) {
-      // first message is sent while the socket is still opening
-      pending.push(message)
-    } else {
-      close(UNREACHABLE_MESSAGE)
+      return
     }
+    // Never kill the session on a transient blip caused by a user tap: queue
+    // lobby intent and flush it after the rejoin handshake completes.
+    if (shouldReconnect && activePhase() && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+      pending.push(message)
+      if (!socket || socket.readyState === WebSocket.CLOSED) {
+        scheduleReconnect()
+      }
+      return
+    }
+    close(UNREACHABLE_MESSAGE)
   }
 
   function scheduleReconnect() {
     if (!shouldReconnect) return
     if (phase.value === 'finished' || phase.value === 'closed') return
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      connection.value = 'failed'
+      return
+    }
+    connection.value = 'reconnecting'
     const base = 1000 * Math.pow(2, reconnectAttempts)
     const delay = Math.min(base, 30000) + Math.random() * 500
-    console.log(`[group] disconnected — reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts + 1})`)
+    console.log(
+      `[group] disconnected — reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts + 1})`,
+    )
     reconnectAttempts++
     if (reconnectTimer) clearTimeout(reconnectTimer)
     reconnectTimer = setTimeout(() => connect(), delay)
   }
 
+  /** Manual retry from the reconnect banner (resets the attempt budget). */
+  function retryNow() {
+    reconnectAttempts = 0
+    connection.value = 'reconnecting'
+    connect()
+  }
+
+  function rejoinMessage(): GroupClientMessage | null {
+    const sess = loadSession()
+    if (!sess || !sess.code || !shouldReconnect) return null
+    if (sess.role === 'player' && sess.playerId) {
+      return {
+        type: 'rejoin',
+        code: sess.code,
+        playerId: sess.playerId,
+        name: sess.playerName || playerName.value,
+        secret: sess.secret,
+      }
+    }
+    if (sess.role === 'host') {
+      return { type: 'rejoinHost', code: sess.code, secret: sess.secret }
+    }
+    return null
+  }
+
   function connect() {
-    if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+    if (
+      socket &&
+      (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)
+    ) {
       return
     }
     if (reconnectTimer) {
@@ -197,23 +393,19 @@ export const useGroupStore = defineStore('group', () => {
     socket.onopen = () => {
       console.log('[group] connected')
       reconnectAttempts = 0
+      connection.value = 'online'
+      // Rejoin FIRST so the server knows this socket; only then flush actions
+      // the user queued while offline (otherwise they fail as a stranger).
+      const rejoin = activePhase() ? rejoinMessage() : null
+      if (rejoin) {
+        socket?.send(JSON.stringify(rejoin))
+      }
       const queued = pending.splice(0)
       for (const message of queued) {
+        // join/create carry their own handshake — never replay a stale one
+        // after a rejoin already re-attached this socket.
+        if (rejoin && (message.type === 'join' || message.type === 'create-room')) continue
         socket?.send(JSON.stringify(message))
-      }
-      // auto-rejoin on reconnect (screen-off / background grace) using stored session
-      if (queued.length === 0 && shouldReconnect) {
-        const sess = loadSession()
-        if (sess && sess.code && sess.role === 'player' && sess.playerId) {
-          // only rejoin if we are still in a game that expects it
-          if (phase.value === 'lobby' || phase.value === 'question' || phase.value === 'connecting') {
-            socket?.send(JSON.stringify({ type: 'rejoin', code: sess.code, playerId: sess.playerId, name: sess.playerName || playerName.value }))
-          }
-        } else if (sess && sess.code && sess.role === 'host') {
-          if (phase.value === 'lobby' || phase.value === 'question' || phase.value === 'connecting') {
-            socket?.send(JSON.stringify({ type: 'rejoinHost', code: sess.code }))
-          }
-        }
       }
     }
     socket.onmessage = (event) => handle(JSON.parse(event.data) as GroupServerMessage)
@@ -222,6 +414,7 @@ export const useGroupStore = defineStore('group', () => {
       socket?.close()
     }
     socket.onclose = () => {
+      stopKeepalive()
       // if we intentionally left (leave/closeRoom) or game finished, do not reconnect
       if (!shouldReconnect || phase.value === 'finished' || phase.value === 'closed') {
         pending = []
@@ -229,7 +422,7 @@ export const useGroupStore = defineStore('group', () => {
       }
       // transient drop while in lobby/question/connecting — keep pending for retry
       // and try to re-establish with exponential backoff instead of immediately showing unreachable
-      if (phase.value === 'connecting' || phase.value === 'lobby' || phase.value === 'question') {
+      if (activePhase()) {
         scheduleReconnect()
         return
       }
@@ -238,24 +431,167 @@ export const useGroupStore = defineStore('group', () => {
     }
   }
 
+  let keepaliveTimer: ReturnType<typeof setInterval> | null = null
+
+  function startKeepalive() {
+    stopKeepalive()
+    keepaliveTimer = setInterval(() => {
+      if (
+        socket &&
+        socket.readyState === WebSocket.OPEN &&
+        (phase.value === 'lobby' || phase.value === 'starting' || phase.value === 'question')
+      ) {
+        try {
+          socket.send(JSON.stringify({ type: 'ping' }))
+        } catch {}
+      }
+    }, KEEPALIVE_MS)
+  }
+
+  function stopKeepalive() {
+    if (keepaliveTimer) {
+      clearInterval(keepaliveTimer)
+      keepaliveTimer = null
+    }
+  }
+
   function handle(message: GroupServerMessage) {
+    if (message.type !== 'pong') {
+      connection.value = 'online'
+    }
     switch (message.type) {
       case 'room-created':
         roomCode.value = message.code
         phase.value = 'lobby'
+        quizReady.value = true
+        hostStatus.value = 'waiting-to-start'
+        hostDetail.value = ''
+        hostOnline.value = true
+        hostOfflineExpiresAt.value = 0
+        startingDeadline.value = null
         loadChat(message.code)
         persistSession()
+        if (message.hostSecret) {
+          saveSeat(message.hostSecret, RESUME_TTL_FALLBACK_MS)
+        }
+        startKeepalive()
         break
       case 'joined':
         playerId.value = message.playerId
         roomCode.value = message.roomCode
         players.value = message.players
+        quizReady.value = message.quizReady ?? true
+        hostStatus.value = message.hostStatus ?? 'waiting-to-start'
+        hostDetail.value = message.hostDetail ?? ''
         phase.value = 'lobby'
         loadChat(message.roomCode)
         persistSession()
+        if (message.resumeSecret) {
+          saveSeat(message.resumeSecret, message.resumeTtlMs ?? RESUME_TTL_FALLBACK_MS)
+        }
+        startKeepalive()
+        break
+      case 'state-sync': {
+        // atomic hydrate: apply the whole snapshot before any phase switch so
+        // a mid-game returner never renders a half-synced room
+        playerId.value = message.playerId
+        roomCode.value = message.roomCode
+        players.value = message.players
+        quizReady.value = message.quizReady
+        hostStatus.value = message.hostStatus
+        hostDetail.value = message.hostDetail ?? ''
+        hostOnline.value = message.hostOnline
+        hostOfflineExpiresAt.value = message.hostOfflineExpiresAt ?? 0
+        topic.value = message.topic
+        timerSeconds.value = message.timerSeconds
+        maxPlayers.value = message.maxPlayers
+        startingDeadline.value =
+          message.phase === 'starting' && message.countdownDeadline > 0
+            ? message.countdownDeadline
+            : null
+        if (message.question) {
+          const q = message.question
+          currentIndex.value = q.index
+          total.value = q.total
+          question.value = q.question
+          options.value = q.options
+          timerSeconds.value = q.timerSeconds
+          deadline.value = q.deadline
+          correctAnswer.value = q.correctAnswer
+          myAnswer.value = q.myAnswer
+          allAnswered.value = false
+          liveAnswers.value = {}
+          scoreboard.value = q.scoreboard ?? []
+          answeredCount.value = 0
+          totalPlayers.value = q.scoreboard?.length ?? players.value.length
+        } else {
+          myAnswer.value = null
+          allAnswered.value = false
+          liveAnswers.value = {}
+          if (message.phase !== 'question') {
+            currentIndex.value = 0
+            question.value = ''
+            options.value = []
+            correctAnswer.value = ''
+            scoreboard.value = []
+            answeredCount.value = 0
+            totalPlayers.value = 0
+          }
+        }
+        if (message.phase === 'finished') {
+          leaderboard.value = message.leaderboard
+        } else if (leaderboard.value) {
+          leaderboard.value = null
+        }
+        error.value = ''
+        phase.value = message.phase
+        loadChat(message.roomCode)
+        persistSession()
+        if (message.resumeSecret) {
+          saveSeat(message.resumeSecret, message.resumeTtlMs ?? RESUME_TTL_FALLBACK_MS)
+        } else if (message.hostSecret) {
+          saveSeat(message.hostSecret, RESUME_TTL_FALLBACK_MS)
+        }
+        startKeepalive()
+        break
+      }
+      case 'pong':
+        // clock-sync + proof of life; never touches phase or roster
+        serverOffsetMs.value = message.serverNow - Date.now()
+        break
+      case 'host-disconnected':
+        hostOnline.value = false
+        hostOfflineExpiresAt.value = message.expiresAt
         break
       case 'lobby-updated':
         players.value = message.players
+        quizReady.value = message.quizReady ?? quizReady.value
+        break
+      case 'host-status-updated':
+        hostStatus.value = message.status
+        hostDetail.value = message.detail ?? ''
+        if (message.topic !== undefined) topic.value = message.topic
+        if (message.hostOnline !== undefined) {
+          hostOnline.value = message.hostOnline
+          if (message.hostOnline) hostOfflineExpiresAt.value = 0
+          else if (message.hostOfflineExpiresAt) {
+            hostOfflineExpiresAt.value = message.hostOfflineExpiresAt
+          }
+        }
+        break
+      case 'game-starting':
+        startingDeadline.value = message.deadline
+        hostStatus.value = 'countdown'
+        phase.value = 'starting'
+        error.value = ''
+        break
+      case 'game-start-cancelled':
+        startingDeadline.value = null
+        hostStatus.value = 'waiting-to-start'
+        if (phase.value === 'starting') phase.value = 'lobby'
+        break
+      case 'kicked':
+        close(message.message || 'You were removed by the host.')
         break
       case 'question-started': {
         // players only see the correct answer for the *current* question once revealed
@@ -274,6 +610,8 @@ export const useGroupStore = defineStore('group', () => {
         scoreboard.value = message.scoreboard ?? []
         answeredCount.value = 0
         totalPlayers.value = message.scoreboard?.length ?? players.value.length
+        startingDeadline.value = null
+        hostStatus.value = 'started'
         phase.value = 'question'
         break
       }
@@ -321,6 +659,10 @@ export const useGroupStore = defineStore('group', () => {
         // per-round state cleared so new players can join and the host can rematch
         players.value = message.players
         topic.value = message.topic
+        quizReady.value = message.quizReady ?? true
+        hostStatus.value = 'waiting-to-start'
+        hostDetail.value = ''
+        startingDeadline.value = null
         leaderboard.value = null
         scoreboard.value = []
         answeredCount.value = 0
@@ -376,6 +718,15 @@ export const useGroupStore = defineStore('group', () => {
     answeredCount.value = 0
     totalPlayers.value = 0
     leaderboard.value = null
+    quizReady.value = true
+    hostStatus.value = 'waiting-to-start'
+    hostDetail.value = ''
+    hostOnline.value = true
+    hostOfflineExpiresAt.value = 0
+    startingDeadline.value = null
+    connection.value = 'online'
+    serverOffsetMs.value = 0
+    stopKeepalive()
     chatMessages.value = []
     closedMessage.value = ''
     error.value = ''
@@ -385,10 +736,12 @@ export const useGroupStore = defineStore('group', () => {
 
   function close(message: string) {
     shouldReconnect = false
+    stopKeepalive()
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
     }
+    clearResume()
     clearSession()
     releaseActiveSession()
     phase.value = 'closed'
@@ -413,6 +766,9 @@ export const useGroupStore = defineStore('group', () => {
     topic.value = settings.topic
     hostQuestions.value = settings.questions
     maxPlayers.value = settings.maxPlayers
+    quizReady.value = settings.questions.length > 0
+    hostStatus.value = settings.questions.length > 0 ? 'waiting-to-start' : 'generating'
+    hostDetail.value = ''
     claimActiveSession({ code: 'PENDING', role: 'host' })
     connect()
     send({
@@ -468,7 +824,26 @@ export const useGroupStore = defineStore('group', () => {
   }
 
   function startGame() {
+    error.value = ''
     send({ type: 'start-game' })
+  }
+
+  function cancelStart() {
+    send({ type: 'cancel-start' })
+  }
+
+  function toggleReady(ready: boolean) {
+    send({ type: 'toggle-ready', ready })
+  }
+
+  function kickPlayer(playerIdToKick: string) {
+    send({ type: 'kick-player', playerId: playerIdToKick })
+  }
+
+  function setHostStatus(status: HostStatus, detail = '') {
+    hostStatus.value = status
+    hostDetail.value = detail
+    send({ type: 'host-status', status, detail })
   }
 
   function submitAnswer(option: string) {
@@ -521,8 +896,40 @@ export const useGroupStore = defineStore('group', () => {
     send({ type: 'close-room' })
   }
 
+  /** Best-effort intentional-exit signal (frees the seat, skips the grace hold). */
+  function signalExit() {
+    try {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'client-exit' }))
+      }
+    } catch {}
+    try {
+      const sess = loadSession()
+      if (
+        sess &&
+        sess.code &&
+        sess.role === 'player' &&
+        sess.playerId &&
+        sess.secret &&
+        typeof navigator !== 'undefined' &&
+        typeof navigator.sendBeacon === 'function'
+      ) {
+        navigator.sendBeacon(
+          `${roomServerOrigin()}/leave`,
+          JSON.stringify({
+            code: sess.code,
+            playerId: sess.playerId,
+            secret: sess.secret,
+          }),
+        )
+      }
+    } catch {}
+  }
+
   function leave() {
+    signalExit()
     shouldReconnect = false
+    stopKeepalive()
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
@@ -534,11 +941,72 @@ export const useGroupStore = defineStore('group', () => {
     }
     pending = []
     reconnectAttempts = 0
+    connection.value = 'online'
+    clearResume()
     clearSession()
     releaseActiveSession()
     // explicit leave drops the local chat copy; a mere refresh keeps it
     clearChat(roomCode.value)
     reset()
+  }
+
+  /** One-tap resume from the local mirror (crashed/new tab, seat still warm). */
+  function resumePlayer(code: string, name: string) {
+    reset()
+    shouldReconnect = true
+    reconnectAttempts = 0
+    connection.value = 'reconnecting'
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    role.value = 'player'
+    phase.value = 'connecting'
+    playerName.value = name
+    error.value = ''
+    const normalizedCode = code.trim().toUpperCase()
+    claimActiveSession({ code: normalizedCode, role: 'player', playerName: name })
+    connect()
+    const mirror = loadMirrorSecret(normalizedCode)
+    pending.push({
+      type: 'rejoin',
+      code: normalizedCode,
+      playerId: mirror?.playerId ?? '',
+      name,
+      secret: mirror?.secret,
+    })
+  }
+
+  /** Host one-tap resume from the local mirror. Caller flips to the group view. */
+  function resumeHost(code: string) {
+    reset()
+    shouldReconnect = true
+    reconnectAttempts = 0
+    connection.value = 'reconnecting'
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    role.value = 'host'
+    phase.value = 'connecting'
+    error.value = ''
+    const normalizedCode = code.trim().toUpperCase()
+    claimActiveSession({ code: normalizedCode, role: 'host' })
+    connect()
+    const mirror = loadMirrorSecret(normalizedCode)
+    pending.push({ type: 'rejoinHost', code: normalizedCode, secret: mirror?.secret })
+  }
+
+  function loadMirrorSecret(code: string): { playerId: string | null; secret: string } | null {
+    try {
+      const raw = localStorage.getItem(resumeStorageKey(code))
+      if (!raw) return null
+      const parsed = JSON.parse(raw) as ResumeRecord
+      if (!parsed.secret || !resumeFresh(parsed)) return null
+      return { playerId: parsed.playerId, secret: parsed.secret }
+    } catch {
+      return null
+    }
   }
 
   // when another tab forces us to drop our session, surface it to the UI
@@ -552,6 +1020,7 @@ export const useGroupStore = defineStore('group', () => {
     }
     pending = []
     shouldReconnect = false
+    clearResume()
     clearSession()
     releaseActiveSession()
     phase.value = 'closed'
@@ -569,13 +1038,15 @@ export const useGroupStore = defineStore('group', () => {
   // reconnect immediately when tab becomes visible again (screen-off) or network returns
   if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && shouldReconnect && (phase.value === 'lobby' || phase.value === 'question' || phase.value === 'connecting')) {
-        connect()
+      if (document.visibilityState === 'visible' && shouldReconnect && activePhase()) {
+        if (connection.value === 'failed') retryNow()
+        else connect()
       }
     })
     window.addEventListener('online', () => {
-      if (shouldReconnect && (phase.value === 'lobby' || phase.value === 'question' || phase.value === 'connecting')) {
-        connect()
+      if (shouldReconnect && activePhase()) {
+        if (connection.value === 'failed') retryNow()
+        else connect()
       }
     })
   }
@@ -603,6 +1074,17 @@ export const useGroupStore = defineStore('group', () => {
     scoreboard,
     answeredCount,
     totalPlayers,
+    quizReady,
+    hostStatus,
+    hostDetail,
+    hostOnline,
+    hostOfflineExpiresAt,
+    startingDeadline,
+    connection,
+    serverOffsetMs,
+    myReady,
+    readyCount,
+    allReady,
     chatMessages,
     sendChat,
     myRank,
@@ -615,8 +1097,17 @@ export const useGroupStore = defineStore('group', () => {
     checkRoomConflict,
     createRoom,
     joinRoom,
+    resumePlayer,
+    resumeHost,
+    getResumeOffer,
+    discardResume,
+    retryNow,
     prepareJoin,
     startGame,
+    cancelStart,
+    toggleReady,
+    kickPlayer,
+    setHostStatus,
     submitAnswer,
     nextQuestion,
     backToLobby,
