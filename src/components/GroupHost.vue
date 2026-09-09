@@ -6,14 +6,20 @@ import SettingsMenu from './SettingsMenu.vue'
 import ConfettiBurst from './ConfettiBurst.vue'
 import FinalLeaderboard from './FinalLeaderboard.vue'
 import LobbyChat from './LobbyChat.vue'
+import ConnectionBanner from './ConnectionBanner.vue'
+import LobbyRoster from './LobbyRoster.vue'
+import LobbyStatusBanner from './LobbyStatusBanner.vue'
+import CountdownOverlay from './CountdownOverlay.vue'
 import TriviaCard from './TriviaCard.vue'
 
-const emit = defineEmits<{ leave: []; 'play-again': [] }>()
+const emit = defineEmits<{ leave: []; 'play-again': []; 'edit-setup': [] }>()
 
 const store = useGroupStore()
 const countdown = useCountdown(() => store.deadline)
 
 const copied = ref(false)
+const kickTarget = ref<{ playerId: string; name: string } | null>(null)
+const kickDialogRef = ref<HTMLDialogElement | null>(null)
 
 const answeredCount = computed(() => Object.keys(store.liveAnswers).length)
 const isLastQuestion = computed(() => store.currentIndex + 1 >= store.total)
@@ -79,7 +85,7 @@ function releaseWakeLock() {
 watch(
   () => store.phase,
   (phase) => {
-    if (phase === 'lobby' || phase === 'question') {
+    if (phase === 'lobby' || phase === 'starting' || phase === 'question') {
       void requestWakeLock()
     } else {
       releaseWakeLock()
@@ -91,7 +97,7 @@ if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
     if (
       document.visibilityState === 'visible' &&
-      (store.phase === 'lobby' || store.phase === 'question')
+      (store.phase === 'lobby' || store.phase === 'starting' || store.phase === 'question')
     ) {
       void requestWakeLock()
     }
@@ -157,6 +163,22 @@ function next() {
   store.nextQuestion()
 }
 
+function requestKick(playerId: string, name: string) {
+  kickTarget.value = { playerId, name }
+  kickDialogRef.value?.showModal()
+}
+
+function confirmKick() {
+  if (kickTarget.value) store.kickPlayer(kickTarget.value.playerId)
+  kickTarget.value = null
+  kickDialogRef.value?.close()
+}
+
+function cancelKick() {
+  kickTarget.value = null
+  kickDialogRef.value?.close()
+}
+
 const exitDialogRef = ref<HTMLDialogElement | null>(null)
 
 function requestExit() {
@@ -198,7 +220,7 @@ function playAgain() {
       </div>
     </header>
 
-    <main class="mx-auto w-full max-w-3xl p-4">
+    <main class="mx-auto w-full max-w-5xl p-4">
       <div
         v-if="(store.phase === 'lobby' || store.phase === 'question') && !hasWakeLock"
         class="alert alert-warning mb-4 text-sm"
@@ -249,52 +271,125 @@ function playAgain() {
       </div>
 
       <!-- lobby: show the room code and wait for players -->
-      <div v-else-if="store.phase === 'lobby'" class="card mt-4 shadow-xl">
-        <div class="card-body items-center gap-4 text-center">
-          <div>
-            <span class="label text-base font-semibold opacity-70">Room code</span>
-            <div
-              class="break-all text-3xl font-black tracking-[0.2em] sm:text-4xl sm:tracking-[0.3em] md:text-5xl md:tracking-[0.35em]"
-            >
-              {{ store.roomCode }}
+      <div
+        v-else-if="store.phase === 'lobby'"
+        class="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start"
+      >
+        <div class="card flex-1 shadow-xl">
+          <div class="card-body items-center gap-4 text-center">
+            <div>
+              <span class="label text-base font-semibold opacity-70">Room code</span>
+              <div
+                class="break-all text-3xl font-black tracking-[0.2em] sm:text-4xl sm:tracking-[0.3em] md:text-5xl md:tracking-[0.35em]"
+              >
+                {{ store.roomCode }}
+              </div>
+            </div>
+            <div class="w-full">
+              <ConnectionBanner />
+            </div>
+            <div class="w-full">
+              <LobbyStatusBanner
+                :status="store.hostStatus"
+                :detail="store.hostDetail"
+                :topic="store.topic"
+                :quiz-ready="store.quizReady"
+                :host-online="store.hostOnline"
+                :host-offline-expires-at="store.hostOfflineExpiresAt"
+              />
+            </div>
+            <p class="max-w-md text-sm opacity-70">
+              Players open Quiznix AI on their gadgets, enter this code and their name to join.
+            </p>
+            <button class="btn btn-outline btn-sm" @click="copyLink">
+              {{ copied ? 'Copied!' : 'Copy join link' }}
+            </button>
+            <p v-if="!store.quizReady" class="alert alert-warning text-sm">
+              Generating questions… Start unlocks when they are ready.
+            </p>
+            <p v-if="store.error" role="alert" class="alert alert-error text-sm">
+              {{ store.error }}
+            </p>
+            <p class="text-sm opacity-60">
+              {{ store.readyCount }} / {{ store.players.length }} ready · 100% required to start
+            </p>
+            <TriviaCard :interval-ms="10000" />
+            <div class="w-full text-left">
+              <LobbyChat />
+            </div>
+            <div class="card-actions mt-2 flex-wrap justify-center">
+              <button
+                class="btn btn-primary btn-lg"
+                :disabled="store.players.length === 0 || !store.allReady || !store.quizReady"
+                @click="store.startGame()"
+              >
+                🚀 Start game ({{ store.readyCount }}/{{ store.players.length }} ready)
+              </button>
+              <button class="btn btn-outline" @click="emit('edit-setup')">Edit setup</button>
+              <button class="btn btn-ghost" @click="requestExit">Exit</button>
             </div>
           </div>
-          <p class="max-w-md text-sm opacity-70">
-            Players open Quiznix AI on their gadgets, enter this code and their name to join.
-          </p>
-          <button class="btn btn-outline btn-sm" @click="copyLink">
-            {{ copied ? 'Copied!' : 'Copy join link' }}
-          </button>
-          <div class="flex min-h-10 flex-wrap justify-center gap-2">
-            <span
-              v-for="player in store.players"
-              :key="player.playerId"
-              class="badge badge-soft badge-secondary"
-            >
-              👤 {{ player.name }}
-            </span>
-            <span v-if="store.players.length === 0" class="text-sm opacity-60">
-              Waiting for players…
-            </span>
-          </div>
-          <p class="text-sm opacity-60">
-            {{ store.players.length }} / {{ store.maxPlayers }} joined
-          </p>
-          <TriviaCard :interval-ms="10000" />
-          <div class="w-full text-left">
-            <LobbyChat />
-          </div>
-          <div class="card-actions mt-2">
-            <button
-              class="btn btn-primary btn-lg"
-              :disabled="store.players.length === 0"
-              @click="store.startGame()"
-            >
-              🚀 Start game
-            </button>
-            <button class="btn btn-ghost" @click="requestExit">Exit</button>
+        </div>
+        <aside class="w-full lg:w-80 lg:shrink-0">
+          <LobbyRoster
+            :players="store.players"
+            :max-players="store.maxPlayers"
+            :is-host="true"
+            @kick="
+              (id) => {
+                const t = store.players.find((p) => p.playerId === id)
+                if (t) requestKick(id, t.name)
+              }
+            "
+          />
+        </aside>
+      </div>
+
+      <!-- starting countdown (host can cancel) -->
+      <div
+        v-else-if="store.phase === 'starting'"
+        class="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start"
+      >
+        <div class="card flex-1 shadow-xl">
+          <div class="card-body items-center gap-4 text-center">
+            <div class="w-full">
+              <ConnectionBanner />
+            </div>
+            <div class="w-full">
+              <LobbyStatusBanner
+                status="countdown"
+                :detail="''"
+                :topic="store.topic"
+                :quiz-ready="store.quizReady"
+                :host-online="store.hostOnline"
+                :host-offline-expires-at="store.hostOfflineExpiresAt"
+              />
+            </div>
+            <p class="text-sm opacity-70">Game starting — countdown is live for players.</p>
+            <div class="w-full text-left">
+              <LobbyChat />
+            </div>
+            <button class="btn btn-ghost" @click="store.cancelStart()">Cancel start</button>
           </div>
         </div>
+        <aside class="w-full lg:w-80 lg:shrink-0">
+          <LobbyRoster
+            :players="store.players"
+            :max-players="store.maxPlayers"
+            :is-host="true"
+            @kick="
+              (id) => {
+                const t = store.players.find((p) => p.playerId === id)
+                if (t) requestKick(id, t.name)
+              }
+            "
+          />
+        </aside>
+        <CountdownOverlay
+          :deadline="store.startingDeadline"
+          cancellable
+          @cancel="store.cancelStart()"
+        />
       </div>
 
       <!-- live question -->
@@ -369,6 +464,23 @@ function playAgain() {
         <div class="modal-action">
           <button class="btn btn-ghost" @click="exitDialogRef?.close()">Cancel</button>
           <button class="btn btn-error" @click="confirmExit">Exit quiz</button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+      </form>
+    </dialog>
+
+    <!-- kick verification -->
+    <dialog ref="kickDialogRef" class="modal">
+      <div class="modal-box">
+        <h3 class="text-lg font-bold">Kick {{ kickTarget?.name }}?</h3>
+        <p class="py-4 text-sm opacity-80">
+          They will be removed from the lobby and need the room code to rejoin. Continue?
+        </p>
+        <div class="modal-action">
+          <button class="btn btn-ghost" @click="cancelKick">Cancel</button>
+          <button class="btn btn-error" @click="confirmKick">Kick player</button>
         </div>
       </div>
       <form method="dialog" class="modal-backdrop">

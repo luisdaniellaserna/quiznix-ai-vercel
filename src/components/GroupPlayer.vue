@@ -6,6 +6,10 @@ import SettingsMenu from './SettingsMenu.vue'
 import ConfettiBurst from './ConfettiBurst.vue'
 import FinalLeaderboard from './FinalLeaderboard.vue'
 import LobbyChat from './LobbyChat.vue'
+import ConnectionBanner from './ConnectionBanner.vue'
+import LobbyRoster from './LobbyRoster.vue'
+import LobbyStatusBanner from './LobbyStatusBanner.vue'
+import CountdownOverlay from './CountdownOverlay.vue'
 import TriviaCard from './TriviaCard.vue'
 
 const emit = defineEmits<{
@@ -32,6 +36,27 @@ const params = new URLSearchParams(window.location.search)
 const joinCode = ref((params.get('room') ?? '').toUpperCase().slice(0, 6))
 const playerName = ref('')
 const joining = ref(false)
+const resumeOffer = ref(store.getResumeOffer())
+
+function resume() {
+  const offer = resumeOffer.value
+  if (!offer) return
+  const blocker = store.checkRoomConflict()
+  if (blocker && blocker.code !== offer.code) {
+    emit('room-conflict', { blocker, code: offer.code, name: offer.name })
+    return
+  }
+  joining.value = true
+  joinCode.value = offer.code
+  playerName.value = offer.name
+  store.resumePlayer(offer.code, offer.name)
+}
+
+function dismissResume() {
+  const offer = resumeOffer.value
+  if (offer) store.discardResume(offer.code)
+  resumeOffer.value = null
+}
 
 watch(
   () => store.phase,
@@ -44,8 +69,17 @@ watch(
 
 watch(
   () => store.error,
-  () => {
+  (message) => {
     joining.value = false
+    // a dead seat (room restarted, window expired, seat taken) invalidates the offer
+    if (
+      message &&
+      resumeOffer.value &&
+      /not found|expired|verify|no pending slot|full/i.test(message)
+    ) {
+      store.discardResume(resumeOffer.value.code)
+      resumeOffer.value = null
+    }
   },
 )
 
@@ -235,6 +269,17 @@ function confirmLeave() {
             <h2 class="text-2xl font-black">Join a live quiz</h2>
             <p class="text-sm opacity-70">Enter the room code your host shared.</p>
           </div>
+          <div v-if="resumeOffer && resumeOffer.role === 'player'" class="alert alert-info text-sm">
+            <span
+              >Were you <strong>{{ resumeOffer.name }}</strong> in room
+              <strong>{{ resumeOffer.code }}</strong
+              >? Your seat may still be held.</span
+            >
+            <div class="flex gap-2">
+              <button class="btn btn-primary btn-sm" @click="resume">Resume</button>
+              <button class="btn btn-ghost btn-sm" @click="dismissResume">Dismiss</button>
+            </div>
+          </div>
           <div v-if="store.error" role="alert" class="alert alert-error">
             {{ store.error }}
           </div>
@@ -268,25 +313,97 @@ function confirmLeave() {
       </div>
 
       <!-- lobby: waiting for the host -->
-      <div v-else-if="store.phase === 'lobby'" class="card mt-4 shadow-xl">
-        <div class="card-body items-center gap-4 text-center">
-          <h2 class="text-2xl font-black">You're in!</h2>
-          <p class="text-sm opacity-70">Waiting for the host to start the game…</p>
-          <div class="flex flex-wrap justify-center gap-2">
-            <span
-              v-for="player in store.players"
-              :key="player.playerId"
-              class="badge badge-soft badge-secondary"
+      <div
+        v-else-if="store.phase === 'lobby'"
+        class="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start"
+      >
+        <div class="card flex-1 shadow-xl">
+          <div class="card-body items-center gap-4 text-center">
+            <h2 class="text-2xl font-black">You're in!</h2>
+            <div class="w-full">
+              <ConnectionBanner />
+            </div>
+            <div class="w-full">
+              <LobbyStatusBanner
+                :status="store.hostStatus"
+                :detail="store.hostDetail"
+                :topic="store.topic"
+                :quiz-ready="store.quizReady"
+                :host-online="store.hostOnline"
+                :host-offline-expires-at="store.hostOfflineExpiresAt"
+              />
+            </div>
+            <p v-if="store.error" role="alert" class="alert alert-error text-sm">
+              {{ store.error }}
+            </p>
+            <button
+              class="btn btn-lg w-full"
+              :class="store.myReady ? 'btn-success' : 'btn-primary'"
+              :disabled="!store.quizReady"
+              @click="store.toggleReady(!store.myReady)"
             >
-              👤 {{ player.name }}
-            </span>
+              {{ store.myReady ? '✓ Ready — tap to unready' : "I'm Ready" }}
+            </button>
+            <p class="text-sm opacity-70">
+              {{ store.readyCount }} / {{ store.players.length }} ready · host starts when 100%
+              ready
+            </p>
+            <div class="w-full text-left">
+              <LobbyChat />
+            </div>
+            <TriviaCard :interval-ms="10000" />
+            <button class="btn btn-ghost" @click="requestLeave">Leave lobby</button>
           </div>
-          <div class="w-full text-left">
-            <LobbyChat />
-          </div>
-          <TriviaCard :interval-ms="10000" />
-          <button class="btn btn-ghost" @click="requestLeave">Leave lobby</button>
         </div>
+        <aside class="w-full lg:w-80 lg:shrink-0">
+          <LobbyRoster
+            :players="store.players"
+            :max-players="store.maxPlayers"
+            :self-id="store.playerId"
+            :is-host="false"
+          />
+        </aside>
+      </div>
+
+      <!-- starting countdown -->
+      <div
+        v-else-if="store.phase === 'starting'"
+        class="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start"
+      >
+        <div class="card flex-1 shadow-xl">
+          <div class="card-body items-center gap-4 text-center">
+            <div class="w-full">
+              <ConnectionBanner />
+            </div>
+            <div class="w-full">
+              <LobbyStatusBanner
+                status="countdown"
+                :detail="''"
+                :topic="store.topic"
+                :quiz-ready="store.quizReady"
+                :host-online="store.hostOnline"
+                :host-offline-expires-at="store.hostOfflineExpiresAt"
+              />
+            </div>
+            <p class="text-sm opacity-70">
+              Starting in
+              {{ Math.ceil(((store.startingDeadline ?? Date.now()) - Date.now()) / 1000) }}s — stay
+              ready…
+            </p>
+            <div class="w-full text-left">
+              <LobbyChat />
+            </div>
+          </div>
+        </div>
+        <aside class="w-full lg:w-80 lg:shrink-0">
+          <LobbyRoster
+            :players="store.players"
+            :max-players="store.maxPlayers"
+            :self-id="store.playerId"
+            :is-host="false"
+          />
+        </aside>
+        <CountdownOverlay :deadline="store.startingDeadline" />
       </div>
 
       <!-- answering a question -->
@@ -296,6 +413,7 @@ function confirmLeave() {
       >
         <div class="card flex-1 shadow-xl">
           <div class="card-body gap-4">
+            <ConnectionBanner />
             <div class="flex items-center justify-between">
               <span class="font-bold"
                 >Question {{ store.currentIndex + 1 }} / {{ store.total }}</span
@@ -445,8 +563,8 @@ function confirmLeave() {
       <div class="modal-box">
         <h3 class="text-lg font-bold">Leave the lobby?</h3>
         <p class="py-4 text-sm opacity-80">
-          You'll leave Room {{ store.roomCode || 'PENDING' }} and need the room code to rejoin.
-          Are you sure you want to exit the lobby?
+          You'll leave Room {{ store.roomCode || 'PENDING' }} and need the room code to rejoin. Are
+          you sure you want to exit the lobby?
         </p>
         <div class="modal-action">
           <button class="btn btn-ghost" @click="exitDialogRef?.close()">Stay</button>
