@@ -6,6 +6,7 @@ import SettingsMenu from './SettingsMenu.vue'
 import ConfettiBurst from './ConfettiBurst.vue'
 import FinalLeaderboard from './FinalLeaderboard.vue'
 import LobbyChat from './LobbyChat.vue'
+import TriviaCard from './TriviaCard.vue'
 
 const emit = defineEmits<{
   leave: []
@@ -283,6 +284,7 @@ function confirmLeave() {
           <div class="w-full text-left">
             <LobbyChat />
           </div>
+          <TriviaCard :interval-ms="10000" />
           <button class="btn btn-ghost" @click="requestLeave">Leave lobby</button>
         </div>
       </div>
@@ -321,6 +323,8 @@ function confirmLeave() {
                   'btn-error':
                     isRevealed && option === store.myAnswer && option !== store.correctAnswer,
                   'btn-primary':
+                    !isRevealed && (selectedOption === option || store.myAnswer === option),
+                  'btn-active':
                     !isRevealed && (selectedOption === option || store.myAnswer === option),
                   'btn-outline':
                     !isRevealed && selectedOption !== option && store.myAnswer !== option,
