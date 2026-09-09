@@ -34,6 +34,10 @@ export function buildQuizPrompt(
       obvious, canonical questions on each topic.
       ${exclusion}
       The output JSON must contain a "results" array with exactly ${count} entries.
+      Each entry must have "type", "difficulty", "category", "question",
+      "correct_answer", "incorrect_answers", and "explanation".
+      The "explanation" is 1-2 very short sentences (max ~25 words, plain text,
+      no markdown) stating why the correct answer is right.
       Do not stop early, do not summarize, and do not skip any questions.
       Return all ${count} questions, then stop.
       ${seedLine}
