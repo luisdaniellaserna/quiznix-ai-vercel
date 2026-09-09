@@ -135,9 +135,50 @@ function parseAndValidate(raw: string): Questions {
 }
 
 function dedupeByQuestion(existing: QuestionFormat[], candidate: QuestionFormat): boolean {
-  const text = candidate.question.trim().toLowerCase()
+  const text = normalizeQuestion(candidate.question)
   if (!text) return false
-  return existing.some((q) => q.question.trim().toLowerCase() === text)
+  return existing.some((q) => normalizeQuestion(q.question) === text)
+}
+
+function normalizeQuestion(text: string): string {
+  return text.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+// Texts of recently asked questions, persisted across sessions so the next quiz
+// can explicitly exclude them. Only the prompt needs them — no other state.
+const QUESTION_HISTORY_KEY = 'quiznix-question-history'
+const QUESTION_HISTORY_LIMIT = 60
+const QUESTION_EXCLUDE_LIMIT = 30
+
+function loadQuestionHistory(): string[] {
+  try {
+    const raw = localStorage.getItem(QUESTION_HISTORY_KEY)
+    if (!raw) return []
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((q): q is string => typeof q === 'string' && q.trim() !== '')
+  } catch {
+    return []
+  }
+}
+
+function saveQuestionHistory(questions: string[]): void {
+  try {
+    const seen = new Set<string>()
+    const merged = [...loadQuestionHistory(), ...questions]
+      .map((q) => q.trim())
+      .filter((q) => {
+        if (q === '' || seen.has(normalizeQuestion(q))) return false
+        seen.add(normalizeQuestion(q))
+        return true
+      })
+    localStorage.setItem(
+      QUESTION_HISTORY_KEY,
+      JSON.stringify(merged.slice(-QUESTION_HISTORY_LIMIT)),
+    )
+  } catch {
+    /* storage unavailable — quizzes still work, just without cross-session exclusion */
+  }
 }
 
 // The model sometimes returns fewer questions than requested (often after a topic/difficulty
@@ -169,7 +210,8 @@ async function deepseekMain(
   topics: string[],
   mode: Mode,
   count: number,
-  sessionId: string,
+  recentQuestions: string[],
+  variationSeed: string,
   existing: QuestionFormat[] = [],
 ): Promise<Questions> {
   const openai = new OpenAI({
@@ -185,7 +227,7 @@ async function deepseekMain(
     1. Parse idioms, slang, and cultural context (e.g., "kalokohan" means silly trivia, funny facts, or absurd situations).
     2. Map the request to a recognized quiz category (e.g., General Knowledge, Pop Culture, Science & Nature, Entertainment).
     3. Always respond strictly in the valid JSON format specified below, with no markdown code blocks or surrounding text.
-    4. Treat every request as a brand-new, independent conversation. Ignore any prior quizzes, topics, examples, or cached context. Do not reuse, repeat, or be influenced by questions, categories, or examples from any previous session — generate completely fresh questions that fit only the topics given in the current user message.
+    4. Vary your questions across requests: spread them over different subtopics and angles instead of the most obvious, canonical questions, and honor the user message's exclusion list exactly — never repeat or closely paraphrase a listed question. The EXAMPLE OUTPUTS below illustrate FORMAT only: never output those example questions themselves.
 
     EXAMPLE INPUT 1:
     Create a 5 quiz question about JavaScript.
@@ -202,12 +244,14 @@ async function deepseekMain(
     {"response_code":0,"results":[{"type":"multiple","difficulty":"easy","category":"General Knowledge","question":"What did a man in 2011 successfully register as a religion in New Zealand?","correct_answer":"Church of the Flying Spaghetti Monster","incorrect_answers":["Jediism","Pastafarianism","Dudeism"]}]}
   `
 
-  const basePrompt = buildQuizPrompt(topics, mode, count, sessionId)
+  const basePrompt = buildQuizPrompt(topics, mode, count, { recentQuestions, variationSeed })
   const userPrompt =
     existing.length > 0
-      ? `${basePrompt}\n\nThese ${existing.length} questions were already generated for this quiz and must NOT be repeated:\n${existing
+      ? `${basePrompt}\n\nThese ${existing.length} questions were already asked (in this quiz or recent ones) and must NOT be repeated:\n${existing
           .map((q, i) => `${i + 1}. ${q.question}`)
-          .join('\n')}\n\nGenerate exactly ${count} new, distinct questions that fit the same topics and difficulty.`
+          .join(
+            '\n',
+          )}\n\nGenerate exactly ${count} new, distinct questions that fit the same topics and difficulty.`
       : basePrompt
 
   const completion = await openai.chat.completions.create({
@@ -215,7 +259,10 @@ async function deepseekMain(
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ],
-    model: 'deepseek-chat',
+    model: 'deepseek-v4-flash',
+    temperature: 1.1,
+    presence_penalty: 0.6,
+    frequency_penalty: 0.4,
     response_format: {
       type: 'json_object',
     },
@@ -230,23 +277,31 @@ async function deepseekFetchMore(
   topics: string[],
   mode: Mode,
   missing: number,
-  sessionId: string,
+  recentQuestions: string[],
+  variationSeed: string,
   existing: QuestionFormat[],
 ): Promise<QuestionFormat[]> {
-  const result = await deepseekMain(topics, mode, missing, sessionId, existing)
+  const result = await deepseekMain(topics, mode, missing, recentQuestions, variationSeed, existing)
   return result.results
 }
 
-async function generateQuestions(
-  topics: string[],
-  mode: Mode,
-  count: number,
-  sessionId: string,
-): Promise<Questions> {
-  const initial = await deepseekMain(topics, mode, count, sessionId)
+async function generateQuestions(topics: string[], mode: Mode, count: number): Promise<Questions> {
+  const history = loadQuestionHistory()
+  const recent = history.slice(-QUESTION_EXCLUDE_LIMIT)
+  const known = new Set(history.map(normalizeQuestion))
+  const variationSeed = crypto.randomUUID().slice(0, 8)
+  const initial = await deepseekMain(topics, mode, count, recent, variationSeed)
+  // Never re-ask a question from a previous quiz, even if the model ignored
+  // the exclusion list — treat repeats as missing and fetch replacements.
+  const fresh = initial.results.filter((q) => !known.has(normalizeQuestion(q.question)))
+  const base = { ...initial, results: fresh }
+  // `recent` is already in the base prompt's exclusion list — only the
+  // in-quiz questions need repeating here.
   const fetchMore = (missing: number) =>
-    deepseekFetchMore(topics, mode, missing, sessionId, initial.results)
-  return ensureQuestionCount(initial, count, fetchMore)
+    deepseekFetchMore(topics, mode, missing, recent, variationSeed, base.results)
+  const completed = await ensureQuestionCount(base, count, fetchMore)
+  saveQuestionHistory(completed.results.map((q) => q.question))
+  return completed
 }
 
 // guarantee a randomized question order regardless of the AI's output ordering
@@ -299,12 +354,10 @@ async function proceedWithGroupStart(payload: {
 }) {
   status.value = 'loading'
   try {
-    const sessionId = crypto.randomUUID()
     const generated = await generateQuestions(
       payload.topics.filter((topic) => topic !== ''),
       payload.mode,
       payload.itemCount,
-      sessionId,
     )
     const results = shuffleQuestions(generated.results)
     hostReplayMode.value = false
