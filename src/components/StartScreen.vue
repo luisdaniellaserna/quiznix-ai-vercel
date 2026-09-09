@@ -3,10 +3,13 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { MODE_CONFIG, type GameMode, type Mode } from '../quizConfig'
 import SettingsMenu from './SettingsMenu.vue'
 import { prefetchUselessFact } from '../composables/useUselessFact'
+import { useGroupStore } from '../stores/groupStore'
 
 // Warm the trivia cache while the user fills the form, so the loading screen
 // opens with a fresh fact and shows it stably (no mid-read swap).
 onMounted(() => prefetchUselessFact())
+
+const groupStore = useGroupStore()
 
 const emit = defineEmits<{
   'start-quiz': [
@@ -21,6 +24,8 @@ const emit = defineEmits<{
     },
   ]
   'join-group': [payload: { code: string; name: string }]
+  'cancel-edit': []
+  'resume-host': []
 }>()
 
 const props = defineProps<{
@@ -44,7 +49,28 @@ const timeTouched = ref(false)
 const step = ref<Step>('landing')
 const joinCode = ref('')
 const joinName = ref('')
-const joinCodeFromUrl = new URLSearchParams(window.location.search).get('room')?.toUpperCase().slice(0, 6) ?? ''
+const joinCodeFromUrl =
+  new URLSearchParams(window.location.search).get('room')?.toUpperCase().slice(0, 6) ?? ''
+
+const hostResumeOffer = ref(
+  (() => {
+    const offer = groupStore.getResumeOffer()
+    return offer && offer.role === 'host' ? offer : null
+  })(),
+)
+const resumeError = ref('')
+
+function resumeHostSession() {
+  if (!hostResumeOffer.value) return
+  resumeError.value = ''
+  groupStore.resumeHost(hostResumeOffer.value.code)
+  emit('resume-host')
+}
+
+function dismissHostResume() {
+  if (hostResumeOffer.value) groupStore.discardResume(hostResumeOffer.value.code)
+  hostResumeOffer.value = null
+}
 
 const allTopics = computed(() => extraTopics.value.filter((item) => item !== ''))
 
@@ -117,11 +143,21 @@ if (props.fromGroupReplay) {
   }
 }
 
+const quotaPreview = computed(() => {
+  const n = allTopics.value.length
+  const total = Math.max(0, Math.floor(itemCount.value || 0))
+  if (gameMode.value !== 'group' || n === 0 || total <= 0) return ''
+  const base = Math.floor(total / n)
+  const rem = total % n
+  return allTopics.value.map((t, i) => `${t} x${base + (i < rem ? 1 : 0)}`).join(', ')
+})
+
 const canStart = computed(() => {
   if (allTopics.value.length === 0 || !Number.isFinite(itemCount.value) || itemCount.value < 1) {
     return false
   }
   if (gameMode.value === 'group') {
+    if (Math.floor(itemCount.value) < allTopics.value.length) return false
     const playersOk =
       Number.isInteger(maxParticipants.value) &&
       maxParticipants.value >= 2 &&
@@ -222,7 +258,9 @@ function pickGroupAction(action: 'create' | 'join') {
   scrollToStep('setup')
 }
 
-const canJoinGroup = computed(() => joinCode.value.trim().length === 6 && joinName.value.trim() !== '')
+const canJoinGroup = computed(
+  () => joinCode.value.trim().length === 6 && joinName.value.trim() !== '',
+)
 
 function submitJoinGroup() {
   if (!canJoinGroup.value) return
@@ -240,6 +278,11 @@ function backToMode() {
 
 function backToLanding() {
   step.value = 'landing'
+}
+
+function backToGroupChoice() {
+  step.value = 'groupChoice'
+  scrollToStep('setup')
 }
 
 function start() {
@@ -275,7 +318,9 @@ function start() {
 
     <!-- navbar -->
     <header class="relative z-20">
-      <nav class="mx-auto flex w-full max-w-4xl items-center justify-between px-4 pb-6 pt-8 sm:px-6 sm:pb-8 sm:pt-12 lg:px-8">
+      <nav
+        class="mx-auto flex w-full max-w-4xl items-center justify-between px-4 pb-6 pt-8 sm:px-6 sm:pb-8 sm:pt-12 lg:px-8"
+      >
         <span class="text-2xl font-black tracking-tight">Quiznix AI</span>
         <SettingsMenu />
       </nav>
@@ -366,8 +411,14 @@ function start() {
     >
       <div class="relative mx-auto mt-8 max-w-3xl sm:mt-16">
         <div class="rounded-2xl bg-base-100 shadow-2xl">
-          <span class="absolute -left-6 -top-6 hidden -rotate-12 text-4xl drop-shadow-xl sm:-left-10 sm:-top-8 sm:block sm:text-6xl">🎮</span>
-          <span class="absolute -right-6 bottom-4 hidden rotate-12 text-4xl drop-shadow-xl sm:-right-8 sm:bottom-6 sm:block sm:text-6xl">👥</span>
+          <span
+            class="absolute -left-6 -top-6 hidden -rotate-12 text-4xl drop-shadow-xl sm:-left-10 sm:-top-8 sm:block sm:text-6xl"
+            >🎮</span
+          >
+          <span
+            class="absolute -right-6 bottom-4 hidden rotate-12 text-4xl drop-shadow-xl sm:-right-8 sm:bottom-6 sm:block sm:text-6xl"
+            >👥</span
+          >
 
           <div class="border-b border-base-300 px-6 py-4">
             <div
@@ -420,8 +471,14 @@ function start() {
     >
       <div class="relative mx-auto mt-8 max-w-3xl sm:mt-16">
         <div class="rounded-2xl bg-base-100 shadow-2xl">
-          <span class="absolute -left-6 -top-6 hidden -rotate-12 text-4xl drop-shadow-xl sm:-left-10 sm:-top-8 sm:block sm:text-6xl">👥</span>
-          <span class="absolute -right-6 bottom-4 hidden rotate-12 text-4xl drop-shadow-xl sm:-right-8 sm:bottom-6 sm:block sm:text-6xl">🔗</span>
+          <span
+            class="absolute -left-6 -top-6 hidden -rotate-12 text-4xl drop-shadow-xl sm:-left-10 sm:-top-8 sm:block sm:text-6xl"
+            >👥</span
+          >
+          <span
+            class="absolute -right-6 bottom-4 hidden rotate-12 text-4xl drop-shadow-xl sm:-right-8 sm:bottom-6 sm:block sm:text-6xl"
+            >🔗</span
+          >
 
           <div class="border-b border-base-300 px-6 py-4">
             <div
@@ -429,6 +486,20 @@ function start() {
             >
               <span class="text-primary">▣</span> Group — what do you want to do?
             </div>
+          </div>
+
+          <div v-if="hostResumeOffer" class="px-6 pt-6 sm:px-10 sm:pt-8">
+            <div class="alert alert-info text-sm">
+              <span
+                >Your room <strong>{{ hostResumeOffer.code }}</strong> may still be live. Rejoin as
+                host?</span
+              >
+              <div class="flex gap-2">
+                <button class="btn btn-primary btn-sm" @click="resumeHostSession">Reconnect</button>
+                <button class="btn btn-ghost btn-sm" @click="dismissHostResume">Dismiss</button>
+              </div>
+            </div>
+            <p v-if="resumeError" role="alert" class="mt-2 text-sm text-error">{{ resumeError }}</p>
           </div>
 
           <div class="grid gap-5 p-6 sm:p-10 sm:grid-cols-2">
@@ -474,8 +545,14 @@ function start() {
     >
       <div class="relative mx-auto mt-8 max-w-3xl sm:mt-16">
         <div class="rounded-2xl bg-base-100 shadow-2xl">
-          <span class="absolute -left-6 -top-6 hidden -rotate-12 text-4xl drop-shadow-xl sm:-left-10 sm:-top-8 sm:block sm:text-6xl">🔑</span>
-          <span class="absolute -right-6 bottom-4 hidden rotate-12 text-4xl drop-shadow-xl sm:-right-8 sm:bottom-6 sm:block sm:text-6xl">👋</span>
+          <span
+            class="absolute -left-6 -top-6 hidden -rotate-12 text-4xl drop-shadow-xl sm:-left-10 sm:-top-8 sm:block sm:text-6xl"
+            >🔑</span
+          >
+          <span
+            class="absolute -right-6 bottom-4 hidden rotate-12 text-4xl drop-shadow-xl sm:-right-8 sm:bottom-6 sm:block sm:text-6xl"
+            >👋</span
+          >
 
           <div class="border-b border-base-300 px-6 py-4">
             <div
@@ -486,7 +563,9 @@ function start() {
           </div>
 
           <form class="grid gap-5 p-6 sm:p-10" @submit.prevent="submitJoinGroup">
-            <p class="text-center text-sm opacity-70">Enter the room code your host shared and your name.</p>
+            <p class="text-center text-sm opacity-70">
+              Enter the room code your host shared and your name.
+            </p>
             <label class="form-control">
               <span class="label font-semibold">Room code</span>
               <input
@@ -508,7 +587,11 @@ function start() {
                 class="input input-bordered input-lg w-full rounded-xl focus:outline-none"
               />
             </label>
-            <button type="submit" class="btn btn-primary mt-2 h-14 rounded-full text-lg font-semibold" :disabled="!canJoinGroup">
+            <button
+              type="submit"
+              class="btn btn-primary mt-2 h-14 rounded-full text-lg font-semibold"
+              :disabled="!canJoinGroup"
+            >
               Join room
             </button>
           </form>
@@ -516,7 +599,7 @@ function start() {
           <div class="border-t border-base-300 px-6 py-4 text-center">
             <button
               class="text-sm font-semibold text-base-content/60 underline-offset-4 hover:underline"
-              @click="step = 'groupChoice'; scrollToStep('setup')"
+              @click="backToGroupChoice"
             >
               ← Back to group options
             </button>
@@ -526,11 +609,21 @@ function start() {
     </section>
 
     <!-- quiz setup (chosen mode) -->
-    <section v-else-if="step === 'form'" id="setup" class="relative z-10 mx-auto w-full max-w-3xl px-6 pb-24 pt-10">
+    <section
+      v-else-if="step === 'form'"
+      id="setup"
+      class="relative z-10 mx-auto w-full max-w-3xl px-6 pb-24 pt-10"
+    >
       <div class="relative mx-auto mt-8 max-w-3xl sm:mt-16">
         <div class="rounded-2xl bg-base-100 shadow-2xl">
-          <span class="absolute -left-6 -top-6 hidden -rotate-12 text-4xl drop-shadow-xl sm:-left-10 sm:-top-8 sm:block sm:text-6xl">📜</span>
-          <span class="absolute -right-6 bottom-4 hidden rotate-12 text-4xl drop-shadow-xl sm:-right-8 sm:bottom-6 sm:block sm:text-6xl">🧩</span>
+          <span
+            class="absolute -left-6 -top-6 hidden -rotate-12 text-4xl drop-shadow-xl sm:-left-10 sm:-top-8 sm:block sm:text-6xl"
+            >📜</span
+          >
+          <span
+            class="absolute -right-6 bottom-4 hidden rotate-12 text-4xl drop-shadow-xl sm:-right-8 sm:bottom-6 sm:block sm:text-6xl"
+            >🧩</span
+          >
 
           <!-- app top bar -->
           <div class="border-b border-base-300 px-6 py-4">
@@ -649,21 +742,50 @@ function start() {
                 class="toggle toggle-success"
               />
             </div>
+            <p v-if="gameMode === 'group' && quotaPreview" class="text-sm opacity-70">
+              Split: {{ quotaPreview }} ({{ Math.floor(itemCount || 0) }} total)
+            </p>
+            <p
+              v-if="
+                gameMode === 'group' &&
+                allTopics.length > 0 &&
+                Math.floor(itemCount || 0) < allTopics.length
+              "
+              class="text-sm text-error"
+            >
+              Need at least {{ allTopics.length }} questions for {{ allTopics.length }} topics.
+            </p>
             <button
               type="submit"
               class="btn btn-primary mt-2 h-14 rounded-full text-lg font-semibold"
               :disabled="!canStart"
             >
-              🚀 Start {{ gameMode }} quiz
+              🚀 {{ fromGroupReplay ? 'Finalize questions' : `Start ${gameMode} quiz` }}
+            </button>
+            <button
+              v-if="fromGroupReplay"
+              type="button"
+              class="btn btn-ghost"
+              @click="emit('cancel-edit')"
+            >
+              Back to lobby without changes
             </button>
           </form>
 
           <div class="border-t border-base-300 px-6 py-4 text-center">
             <button
+              v-if="!fromGroupReplay"
               class="text-sm font-semibold text-base-content/60 underline-offset-4 hover:underline"
               @click="backToMode"
             >
               ← Change game mode
+            </button>
+            <button
+              v-else
+              class="text-sm font-semibold text-base-content/60 underline-offset-4 hover:underline"
+              @click="emit('cancel-edit')"
+            >
+              ← Back to lobby
             </button>
           </div>
         </div>

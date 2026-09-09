@@ -37,10 +37,7 @@ interface BlockingSession {
   ageMs: number
 }
 const blockingSession = ref<BlockingSession | null>(null)
-const pendingGroupAction = ref<
-  | (() => void | Promise<void>)
-  | null
->(null)
+const pendingGroupAction = ref<(() => void | Promise<void>) | null>(null)
 
 function withRoomGuard(action: () => void | Promise<void>) {
   const blocker = groupStore.getBlockingSession()
@@ -107,7 +104,13 @@ function dismissEvicted() {
 }
 
 function onGroupPlayerConflict(payload: {
-  blocker: { tabId: string; code: string; role: 'host' | 'player'; playerName?: string; ageMs: number }
+  blocker: {
+    tabId: string
+    code: string
+    role: 'host' | 'player'
+    playerName?: string
+    ageMs: number
+  }
   code: string
   name: string
 }) {
@@ -337,6 +340,68 @@ async function generateQuestions(topics: string[], mode: Mode, count: number): P
   return completed
 }
 
+/** Even split of total items across topics: first `remainder` topics get +1. */
+function computeQuotas(total: number, numTopics: number): number[] {
+  if (numTopics <= 0) return []
+  const base = Math.floor(total / numTopics)
+  const remainder = total % numTopics
+  return Array.from({ length: numTopics }, (_, i) => base + (i < remainder ? 1 : 0))
+}
+
+/** Group-mode generation: per-topic quota calls so counts are enforceable. */
+async function generateGroupQuestions(
+  topics: string[],
+  mode: Mode,
+  total: number,
+): Promise<Questions> {
+  const clean = topics.filter((t) => t.trim() !== '')
+  if (clean.length === 0) throw new Error('Add at least one topic.')
+  if (total < clean.length) {
+    throw new Error(`Need at least ${clean.length} questions for ${clean.length} topics.`)
+  }
+  const quotas = computeQuotas(total, clean.length)
+  const history = loadQuestionHistory()
+  const recent = history.slice(-QUESTION_EXCLUDE_LIMIT)
+  const known = new Set(history.map(normalizeQuestion))
+  const seedBase = crypto.randomUUID().slice(0, 8)
+  const perTopic = await Promise.all(
+    clean.map((topic, i) =>
+      deepseekMain([topic], mode, quotas[i], recent, `${seedBase}-${i}`).then(
+        (res) => ({ topic, quota: quotas[i], results: res.results }),
+        (err) => {
+          throw new Error(
+            `Could not generate questions for "${topic}": ${err instanceof Error ? err.message : String(err)}`,
+          )
+        },
+      ),
+    ),
+  )
+  const merged: QuestionFormat[] = []
+  for (const { results } of perTopic) {
+    for (const q of results) {
+      if (!known.has(normalizeQuestion(q.question)) && !dedupeByQuestion(merged, q)) {
+        merged.push(q)
+      }
+    }
+  }
+  // top-up any shortfall (model returned fewer or dupes filtered)
+  if (merged.length < total) {
+    const missing = total - merged.length
+    const extra = await deepseekFetchMore(clean, mode, missing, recent, seedBase, merged)
+    for (const q of extra) {
+      if (!dedupeByQuestion(merged, q) && !known.has(normalizeQuestion(q.question))) {
+        merged.push(q)
+      }
+    }
+  }
+  if (merged.length < total) {
+    throw new Error(`Only ${merged.length} of ${total} questions were generated. Please try again.`)
+  }
+  const results = shuffleQuestions(merged).slice(0, total)
+  saveQuestionHistory(results.map((q) => q.question))
+  return { response_code: 0, results }
+}
+
 // guarantee a randomized question order regardless of the AI's output ordering
 function shuffleQuestions<T>(items: T[]): T[] {
   const shuffled = [...items]
@@ -385,62 +450,69 @@ async function proceedWithGroupStart(payload: {
   maxPlayers?: number
   timePerQuestion?: number
 }) {
-  status.value = 'loading'
-  // Minimum time on the loading screen so the trivia card is readable even
-  // when question generation finishes fast.
-  const MIN_TRIVIA_MS = 5000
-  const startedAt = Date.now()
-  try {
-    const generated = await generateQuestions(
-      payload.topics.filter((topic) => topic !== ''),
-      payload.mode,
-      payload.itemCount,
-    )
-    const results = shuffleQuestions(generated.results)
-    const remaining = MIN_TRIVIA_MS - (Date.now() - startedAt)
-    if (remaining > 0) {
-      await new Promise((resolve) => setTimeout(resolve, remaining))
-    }
-    hostReplayMode.value = false
-    if (payload.gameMode === 'group') {
-      // Host is replaying after a finished round → reuse the existing room
-      // (same player ids, same room code) instead of creating a new one. The
-      // room waits in the lobby while the host changes the setup, so replace
-      // its quiz content in place and stay there until they press Start.
-      const updatingLobbyRoom =
-        groupStore.role === 'host' && groupStore.phase === 'lobby' && groupStore.roomCode !== ''
-      if (updatingLobbyRoom) {
-        groupStore.updateRoomQuiz({
-          topic: payload.topics.join(', '),
-          questions: results,
-          timerSeconds: payload.timePerQuestion ?? MODE_CONFIG[payload.mode].timerSeconds,
-          maxPlayers: payload.maxPlayers ?? 10,
-        })
-      } else {
-        groupStore.createRoom({
-          topic: payload.topics.join(', '),
-          questions: results,
-          timerSeconds: payload.timePerQuestion ?? MODE_CONFIG[payload.mode].timerSeconds,
-          maxPlayers: payload.maxPlayers ?? 10,
-        })
+  const cleanTopics = payload.topics.filter((topic) => topic !== '')
+  const timerSeconds = payload.timePerQuestion ?? MODE_CONFIG[payload.mode].timerSeconds
+  const maxPlayers = payload.maxPlayers ?? 10
+  const topicLabel = cleanTopics.join(', ')
+  if (payload.gameMode !== 'group') {
+    status.value = 'loading'
+    const MIN_TRIVIA_MS = 5000
+    const startedAt = Date.now()
+    try {
+      const generated = await generateQuestions(cleanTopics, payload.mode, payload.itemCount)
+      const results = shuffleQuestions(generated.results)
+      const remaining = MIN_TRIVIA_MS - (Date.now() - startedAt)
+      if (remaining > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remaining))
       }
-      status.value = 'group'
-    } else {
+      hostReplayMode.value = false
       question.value = { ...generated, results }
       status.value = 'ready'
+    } catch (err) {
+      console.error(err)
+      errorMessage.value =
+        err instanceof SyntaxError
+          ? 'The quiz generator returned an invalid response. Please try again.'
+          : err instanceof Error
+            ? err.message
+            : 'Something went wrong! Please try again.'
+      status.value = 'start'
+      isError.value = true
+      pendingGroupAction.value = null
+      blockingSession.value = null
     }
+    return
+  }
+
+  // Group flow: room goes live instantly so players can join during generation.
+  // New room -> create empty (quizReady=false) then fill via updateRoomQuiz.
+  // Existing lobby room -> regenerate in place via updateRoomQuiz.
+  const isNewRoom = !(
+    groupStore.role === 'host' &&
+    groupStore.phase === 'lobby' &&
+    groupStore.roomCode !== ''
+  )
+  hostReplayMode.value = false
+  if (isNewRoom) {
+    groupStore.createRoom({ topic: topicLabel, questions: [], timerSeconds, maxPlayers })
+    status.value = 'group'
+  } else {
+    groupStore.setHostStatus('generating', topicLabel)
+    status.value = 'group'
+  }
+  try {
+    const generated = await generateGroupQuestions(cleanTopics, payload.mode, payload.itemCount)
+    const results = shuffleQuestions(generated.results)
+    groupStore.updateRoomQuiz({ topic: topicLabel, questions: results, timerSeconds, maxPlayers })
   } catch (err) {
     console.error(err)
     errorMessage.value =
-      err instanceof SyntaxError
-        ? 'The quiz generator returned an invalid response. Please try again.'
-        : err instanceof Error
-          ? err.message
-          : 'Something went wrong! Please try again.'
-    status.value = 'start'
+      err instanceof Error ? err.message : 'Something went wrong! Please try again.'
     isError.value = true
-    pendingGroupAction.value = null
-    blockingSession.value = null
+    if (!isNewRoom) {
+      groupStore.setHostStatus('choosing-topic', topicLabel)
+    }
+    // new rooms stay in the lobby with quizReady=false; host can Edit setup + retry
   }
 }
 
@@ -488,6 +560,25 @@ function playAgain() {
   returnFromQuiz.value = false
   hostReplayMode.value = true
 }
+
+// Host clicked "Edit setup" inside the lobby — stay in the room, show the
+// setup form prefilled, and mark the lobby as choosing-topic for players.
+function editGroupSetup() {
+  hostReplayMode.value = true
+  returnFromQuiz.value = false
+  status.value = 'start'
+  try {
+    groupStore.setHostStatus('choosing-topic', groupStore.topic)
+  } catch {}
+}
+
+function cancelEditSetup() {
+  hostReplayMode.value = false
+  status.value = 'group'
+  try {
+    groupStore.setHostStatus(groupStore.quizReady ? 'waiting-to-start' : 'generating')
+  } catch {}
+}
 </script>
 
 <template>
@@ -498,12 +589,15 @@ function playAgain() {
       :from-group-replay="hostReplayMode"
       @start-quiz="startQuiz"
       @join-group="joinGroup"
+      @cancel-edit="cancelEditSetup"
+      @resume-host="status = 'group'"
     />
 
     <GroupHost
       v-else-if="status === 'group' && groupStore.role === 'host'"
       @leave="leaveGroup"
       @play-again="playAgain"
+      @edit-setup="editGroupSetup"
     />
     <GroupPlayer
       v-else-if="status === 'group' && groupStore.role === 'player'"
@@ -539,7 +633,9 @@ function playAgain() {
           :score="score"
           :total="userAnswers.length"
         />
-        <div v-else class="alert alert-warning mt-4">No DeepSeek API key! Set VITE_DEEPSEEK_API_KEY in .env.</div>
+        <div v-else class="alert alert-warning mt-4">
+          No DeepSeek API key! Set VITE_DEEPSEEK_API_KEY in .env.
+        </div>
       </main>
     </template>
 
@@ -570,18 +666,23 @@ function playAgain() {
           This browser is in
           <strong class="font-bold">Room {{ blockingSession?.code || 'PENDING' }}</strong>
           <span v-if="blockingSession?.role">
-            as <span class="badge badge-sm badge-secondary align-middle">{{ blockingSession.role }}</span>
+            as
+            <span class="badge badge-sm badge-secondary align-middle">{{
+              blockingSession.role
+            }}</span>
           </span>
-          in another tab. Only one room session per browser is allowed so questions,
-          timers, and scores stay in sync.
+          in another tab. Only one room session per browser is allowed so questions, timers, and
+          scores stay in sync.
         </p>
         <p class="py-1 text-sm opacity-70">
-          Leave the other room to continue here. The other tab will be closed out and you'll
-          take its place.
+          Leave the other room to continue here. The other tab will be closed out and you'll take
+          its place.
         </p>
         <div class="modal-action">
           <button class="btn btn-ghost" @click="cancelTakeover">Stay in other room</button>
-          <button class="btn btn-primary" @click="confirmTakeover">Leave other &amp; continue</button>
+          <button class="btn btn-primary" @click="confirmTakeover">
+            Leave other &amp; continue
+          </button>
         </div>
       </div>
       <form method="dialog" class="modal-backdrop">
@@ -593,7 +694,9 @@ function playAgain() {
     <dialog ref="evictedDialogRef" class="modal">
       <div class="modal-box">
         <h3 class="text-lg font-bold">Switched rooms</h3>
-        <p class="py-3 text-sm opacity-80">{{ groupStore.evictedMessage || 'Another tab took over this session.' }}</p>
+        <p class="py-3 text-sm opacity-80">
+          {{ groupStore.evictedMessage || 'Another tab took over this session.' }}
+        </p>
         <div class="modal-action">
           <button class="btn btn-primary" @click="dismissEvicted">Back to home</button>
         </div>
