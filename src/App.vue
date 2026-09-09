@@ -131,6 +131,15 @@ function parseAndValidate(raw: string): Questions {
   if (!Array.isArray(parsed.results) || parsed.results.length === 0) {
     throw new Error('No quiz questions were generated. Please try again.')
   }
+  // Explanation is optional (old cached questions lack it) — normalize when present.
+  for (const q of parsed.results) {
+    if (typeof q.explanation === 'string') {
+      const trimmed = q.explanation.trim()
+      q.explanation = trimmed === '' ? undefined : trimmed
+    } else {
+      q.explanation = undefined
+    }
+  }
   return parsed
 }
 
@@ -228,6 +237,7 @@ async function deepseekMain(
     2. Map the request to a recognized quiz category (e.g., General Knowledge, Pop Culture, Science & Nature, Entertainment).
     3. Always respond strictly in the valid JSON format specified below, with no markdown code blocks or surrounding text.
     4. Vary your questions across requests: spread them over different subtopics and angles instead of the most obvious, canonical questions, and honor the user message's exclusion list exactly — never repeat or closely paraphrase a listed question. The EXAMPLE OUTPUTS below illustrate FORMAT only: never output those example questions themselves.
+    5. Every question must include an "explanation": 1-2 very short sentences (max ~25 words, plain text, no markdown) stating why the correct answer is right.
 
     EXAMPLE INPUT 1:
     Create a 5 quiz question about JavaScript.
@@ -235,13 +245,13 @@ async function deepseekMain(
     Type: Multiple Choice
 
     EXAMPLE OUTPUT 1:
-    {"response_code":0,"results":[{"type":"multiple","difficulty":"medium","category":"Science: Computers","question":"Which keyword is used to declare a constant variable in JavaScript?","correct_answer":"const","incorrect_answers":["var","let","constant"]}]}
+    {"response_code":0,"results":[{"type":"multiple","difficulty":"medium","category":"Science: Computers","question":"Which keyword is used to declare a constant variable in JavaScript?","correct_answer":"const","incorrect_answers":["var","let","constant"],"explanation":"const declares a block-scoped binding that cannot be reassigned after initialization."}]}
 
     EXAMPLE INPUT 2:
     kalokohan
 
     EXAMPLE OUTPUT 2:
-    {"response_code":0,"results":[{"type":"multiple","difficulty":"easy","category":"General Knowledge","question":"What did a man in 2011 successfully register as a religion in New Zealand?","correct_answer":"Church of the Flying Spaghetti Monster","incorrect_answers":["Jediism","Pastafarianism","Dudeism"]}]}
+    {"response_code":0,"results":[{"type":"multiple","difficulty":"easy","category":"General Knowledge","question":"What did a man in 2011 successfully register as a religion in New Zealand?","correct_answer":"Church of the Flying Spaghetti Monster","incorrect_answers":["Jediism","Pastafarianism","Dudeism"],"explanation":"It was officially recognized as a religion in New Zealand in 2011."}]}
   `
 
   const basePrompt = buildQuizPrompt(topics, mode, count, { recentQuestions, variationSeed })
@@ -254,23 +264,46 @@ async function deepseekMain(
           )}\n\nGenerate exactly ${count} new, distinct questions that fit the same topics and difficulty.`
       : basePrompt
 
-  const completion = await openai.chat.completions.create({
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ],
-    model: 'deepseek-v4-flash',
-    temperature: 1.1,
-    presence_penalty: 0.6,
-    frequency_penalty: 0.4,
-    response_format: {
-      type: 'json_object',
-    },
-  })
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userPrompt },
+  ] as const
 
-  const response = completion.choices[0].message.content
+  // Thinking disabled = fastest path (no chain-of-thought tokens before the JSON).
+  // reasoning_effort 'low' with thinking enabled is the manual/automatic fallback
+  // if disabled ever hurts quality or the API rejects the toggle.
+  const requestQuiz = async (
+    thinkingType: 'enabled' | 'disabled',
+    reasoningEffort?: 'low',
+  ): Promise<Questions> => {
+    const completion = await openai.chat.completions.create({
+      messages: [...messages],
+      model: 'deepseek-v4-flash',
+      // NOTE: temperature/presence/frequency penalties are ignored by DeepSeek
+      // while thinking is enabled, but they DO apply with thinking disabled —
+      // keep them so disabled mode still gets varied questions.
+      temperature: 1.1,
+      presence_penalty: 0.6,
+      frequency_penalty: 0.4,
+      response_format: {
+        type: 'json_object',
+      },
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+      // DeepSeek-specific toggle, not in the OpenAI SDK types — sent top-level.
+      thinking: { type: thinkingType },
+    } as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming & {
+      thinking: { type: 'enabled' | 'disabled' }
+    })
 
-  return parseAndValidate(response ?? '')
+    return parseAndValidate(completion.choices[0].message.content ?? '')
+  }
+
+  try {
+    return await requestQuiz('disabled')
+  } catch (err) {
+    console.warn('[quiz] disabled-thinking request failed, retrying with low effort', err)
+    return await requestQuiz('enabled', 'low')
+  }
 }
 
 async function deepseekFetchMore(
@@ -353,6 +386,10 @@ async function proceedWithGroupStart(payload: {
   timePerQuestion?: number
 }) {
   status.value = 'loading'
+  // Minimum time on the loading screen so the trivia card is readable even
+  // when question generation finishes fast.
+  const MIN_TRIVIA_MS = 5000
+  const startedAt = Date.now()
   try {
     const generated = await generateQuestions(
       payload.topics.filter((topic) => topic !== ''),
@@ -360,6 +397,10 @@ async function proceedWithGroupStart(payload: {
       payload.itemCount,
     )
     const results = shuffleQuestions(generated.results)
+    const remaining = MIN_TRIVIA_MS - (Date.now() - startedAt)
+    if (remaining > 0) {
+      await new Promise((resolve) => setTimeout(resolve, remaining))
+    }
     hostReplayMode.value = false
     if (payload.gameMode === 'group') {
       // Host is replaying after a finished round → reuse the existing room
