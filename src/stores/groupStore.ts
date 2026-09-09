@@ -90,6 +90,10 @@ export const useGroupStore = defineStore('group', () => {
   const hostDetail = ref('')
   const hostOnline = ref(true)
   const hostOfflineExpiresAt = ref(0)
+  // True when the server says our room no longer exists (restart, expiry).
+  // Host keeps its setup and the next finalize creates a fresh room instead
+  // of updating the dead one.
+  const roomExpired = ref(false)
   const startingDeadline = ref<number | null>(null)
   const connection = ref<ConnectionState>('online')
   const serverOffsetMs = ref(0)
@@ -464,6 +468,7 @@ export const useGroupStore = defineStore('group', () => {
         roomCode.value = message.code
         phase.value = 'lobby'
         quizReady.value = true
+        roomExpired.value = false
         hostStatus.value = 'waiting-to-start'
         hostDetail.value = ''
         hostOnline.value = true
@@ -480,6 +485,7 @@ export const useGroupStore = defineStore('group', () => {
         playerId.value = message.playerId
         roomCode.value = message.roomCode
         players.value = message.players
+        roomExpired.value = false
         quizReady.value = message.quizReady ?? true
         hostStatus.value = message.hostStatus ?? 'waiting-to-start'
         hostDetail.value = message.hostDetail ?? ''
@@ -545,6 +551,7 @@ export const useGroupStore = defineStore('group', () => {
         }
         error.value = ''
         phase.value = message.phase
+        roomExpired.value = false
         loadChat(message.roomCode)
         persistSession()
         if (message.resumeSecret) {
@@ -662,6 +669,7 @@ export const useGroupStore = defineStore('group', () => {
         quizReady.value = message.quizReady ?? true
         hostStatus.value = 'waiting-to-start'
         hostDetail.value = ''
+        roomExpired.value = false
         startingDeadline.value = null
         leaderboard.value = null
         scoreboard.value = []
@@ -685,13 +693,30 @@ export const useGroupStore = defineStore('group', () => {
       case 'host-left':
         close('The host left the game.')
         break
-      case 'error':
-        error.value = message.message
+      case 'error': {
+        const text = message.message
+        error.value = text
+        const gone = /not found/i.test(text) && roomCode.value !== ''
         // failed join/create should return to the form instead of staying stuck on loading
         if (phase.value === 'connecting') {
           phase.value = 'idle'
+          if (gone) roomExpired.value = true
+          break
+        }
+        // The room died server-side (restart, grace expiry) while we were in
+        // it. Players get a clean exit; the host keeps its setup and the next
+        // finalize opens a fresh room instead of updating the dead one.
+        if (gone) {
+          roomExpired.value = true
+          if (role.value === 'player') {
+            close('Room closed (server restarted?). Ask the host for a new code.')
+          } else if (role.value === 'host') {
+            error.value =
+              'Room expired on the server. Your setup is kept — finalizing opens a fresh room.'
+          }
         }
         break
+      }
     }
   }
 
@@ -719,6 +744,7 @@ export const useGroupStore = defineStore('group', () => {
     totalPlayers.value = 0
     leaderboard.value = null
     quizReady.value = true
+    roomExpired.value = false
     hostStatus.value = 'waiting-to-start'
     hostDetail.value = ''
     hostOnline.value = true
@@ -741,6 +767,7 @@ export const useGroupStore = defineStore('group', () => {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
     }
+    roomExpired.value = false
     clearResume()
     clearSession()
     releaseActiveSession()
@@ -1075,6 +1102,7 @@ export const useGroupStore = defineStore('group', () => {
     answeredCount,
     totalPlayers,
     quizReady,
+    roomExpired,
     hostStatus,
     hostDetail,
     hostOnline,

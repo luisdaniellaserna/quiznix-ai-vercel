@@ -636,6 +636,14 @@ function start() {
 
           <!-- setup form -->
           <form class="grid gap-5 p-6 sm:p-10" @submit.prevent="start" @keydown.enter.prevent>
+            <div
+              v-if="fromGroupReplay && groupStore.roomExpired"
+              class="alert alert-warning text-sm"
+            >
+              <span
+                >The previous room expired on the server — finalizing opens a fresh room code.</span
+              >
+            </div>
             <div>
               <label class="label text-base font-semibold text-base-content">Topic/s</label>
               <div class="flex flex-col sm:flex-row gap-2">

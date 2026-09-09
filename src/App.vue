@@ -487,11 +487,9 @@ async function proceedWithGroupStart(payload: {
   // Group flow: room goes live instantly so players can join during generation.
   // New room -> create empty (quizReady=false) then fill via updateRoomQuiz.
   // Existing lobby room -> regenerate in place via updateRoomQuiz.
-  const isNewRoom = !(
-    groupStore.role === 'host' &&
-    groupStore.phase === 'lobby' &&
-    groupStore.roomCode !== ''
-  )
+  const isNewRoom =
+    !(groupStore.role === 'host' && groupStore.phase === 'lobby' && groupStore.roomCode !== '') ||
+    groupStore.roomExpired
   hostReplayMode.value = false
   if (isNewRoom) {
     groupStore.createRoom({ topic: topicLabel, questions: [], timerSeconds, maxPlayers })
@@ -567,6 +565,7 @@ function editGroupSetup() {
   hostReplayMode.value = true
   returnFromQuiz.value = false
   status.value = 'start'
+  if (groupStore.roomExpired) return
   try {
     groupStore.setHostStatus('choosing-topic', groupStore.topic)
   } catch {}
@@ -575,6 +574,8 @@ function editGroupSetup() {
 function cancelEditSetup() {
   hostReplayMode.value = false
   status.value = 'group'
+  // dead room: nothing to report status to — finalizing reopens a fresh one
+  if (groupStore.roomExpired) return
   try {
     groupStore.setHostStatus(groupStore.quizReady ? 'waiting-to-start' : 'generating')
   } catch {}
