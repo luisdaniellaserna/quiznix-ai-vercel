@@ -6,6 +6,7 @@ import SettingsMenu from './SettingsMenu.vue'
 import ConfettiBurst from './ConfettiBurst.vue'
 import FinalLeaderboard from './FinalLeaderboard.vue'
 import LobbyChat from './LobbyChat.vue'
+import TriviaCard from './TriviaCard.vue'
 
 const emit = defineEmits<{ leave: []; 'play-again': [] }>()
 
@@ -279,6 +280,7 @@ function playAgain() {
           <p class="text-sm opacity-60">
             {{ store.players.length }} / {{ store.maxPlayers }} joined
           </p>
+          <TriviaCard :interval-ms="10000" />
           <div class="w-full text-left">
             <LobbyChat />
           </div>
