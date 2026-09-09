@@ -64,3 +64,20 @@ export function openBurst(
 ): GroupClientMessage[] {
   return rejoin ? [rejoin, ...queued] : [...queued]
 }
+
+/**
+ * Whether a page load should automatically redial a stored session: only for
+ * a live in-game role, only for the room the loader expects (join link), and
+ * never when another live tab already holds that room.
+ */
+export function shouldAutoResume(
+  sess: StoredSession | null,
+  expectedCode: string | undefined,
+  blockingCode: string | null,
+): boolean {
+  if (!sess || !sess.code) return false
+  if (sess.role !== 'host' && sess.role !== 'player') return false
+  if (expectedCode && expectedCode !== sess.code) return false
+  if (blockingCode && blockingCode === sess.code) return false
+  return true
+}

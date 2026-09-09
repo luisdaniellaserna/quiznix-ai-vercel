@@ -15,7 +15,7 @@ import {
   onEvicted,
   releaseActiveSession,
 } from './groupTabSync'
-import { decideSend, openBurst, rejoinMessageFor } from './reconnectPolicy'
+import { decideSend, openBurst, rejoinMessageFor, shouldAutoResume } from './reconnectPolicy'
 
 export type GroupRole = 'none' | 'host' | 'player'
 export type GroupPhase = 'idle' | 'connecting' | 'lobby' | 'question' | 'finished' | 'closed'
@@ -42,6 +42,7 @@ export const useGroupStore = defineStore('group', () => {
   let reconnectAttempts = 0
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let shouldReconnect = true
+  let resuming = false
   const reconnecting = ref(false)
 
   const role = ref<GroupRole>('none')
@@ -154,7 +155,15 @@ export const useGroupStore = defineStore('group', () => {
       sessionStorage.removeItem(STORAGE_KEY)
     } catch {}
   }
-  function loadSession(): { code: string; playerId: string | null; playerName: string; role: GroupRole } | null {
+  function loadSession(): {
+    code: string
+    playerId: string | null
+    playerName: string
+    role: GroupRole
+    topic?: string
+    hostQuestions?: QuestionFormat[]
+    maxPlayers?: number
+  } | null {
     try {
       const raw = sessionStorage.getItem(STORAGE_KEY)
       return raw ? JSON.parse(raw) : null
@@ -255,6 +264,7 @@ export const useGroupStore = defineStore('group', () => {
         phase.value = 'lobby'
         loadChat(message.code)
         persistSession()
+        resuming = false
         break
       case 'joined':
         playerId.value = message.playerId
@@ -263,6 +273,7 @@ export const useGroupStore = defineStore('group', () => {
         phase.value = 'lobby'
         loadChat(message.roomCode)
         persistSession()
+        resuming = false
         break
       case 'lobby-updated':
         players.value = message.players
@@ -355,8 +366,17 @@ export const useGroupStore = defineStore('group', () => {
         break
       case 'error':
         error.value = message.message
-        // failed join/create should return to the form instead of staying stuck on loading
-        if (phase.value === 'connecting') {
+        if (resuming) {
+          // auto-resume hit a dead room (closed, expired, full): drop the stale
+          // session and land on the ended prompt instead of the join form
+          resuming = false
+          close(
+            /not found|expired|closed|already started|full|already connected/i.test(message.message)
+              ? message.message
+              : 'This room has ended.',
+          )
+        } else if (phase.value === 'connecting') {
+          // failed join/create should return to the form instead of staying stuck on loading
           phase.value = 'idle'
         }
         break
@@ -391,7 +411,10 @@ export const useGroupStore = defineStore('group', () => {
     error.value = ''
     evictedMessage.value = ''
     reconnecting.value = false
+    resuming = false
     // do not clear shouldReconnect here — leave() / close() handle it; createRoom/joinRoom reset it
+    // (explicit leave also clears the stored session via clearSession, so a
+    // later visit never auto-resumes a room the user chose to exit)
   }
 
   function close(message: string) {
@@ -421,6 +444,44 @@ export const useGroupStore = defineStore('group', () => {
     }
     reconnectAttempts = 0
     connect()
+  }
+
+  /**
+   * Resume a live room after a page refresh without making the user retype
+   * the code and name. Redials when the stored session matches the expected
+   * room (join link) and no live tab already holds it; returns true when a
+   * redial started. A failed resume clears the stale session and lands on
+   * the ended prompt via the error handler. Never resumes after an explicit
+   * leave — leave() deletes the stored session.
+   */
+  function autoResume(expectedCode?: string): boolean {
+    if (phase.value !== 'idle') return false
+    const sess = loadSession()
+    if (!sess || sess.role === 'none') return false
+    if (!shouldAutoResume(sess, expectedCode, getBlockingSession()?.code ?? null)) {
+      return false
+    }
+    if (sess.role !== 'host' && sess.role !== 'player') return false
+    reset()
+    shouldReconnect = true
+    reconnectAttempts = 0
+    resuming = true
+    role.value = sess.role
+    roomCode.value = sess.code
+    playerId.value = sess.playerId
+    playerName.value = sess.playerName
+    topic.value = sess.topic ?? ''
+    hostQuestions.value = sess.hostQuestions ?? []
+    if (sess.maxPlayers) maxPlayers.value = sess.maxPlayers
+    phase.value = 'connecting'
+    error.value = ''
+    claimActiveSession(
+      sess.role === 'player'
+        ? { code: sess.code, role: sess.role, playerName: sess.playerName }
+        : { code: sess.code, role: sess.role },
+    )
+    connect()
+    return true
   }
 
   function createRoom(settings: {
@@ -651,6 +712,7 @@ export const useGroupStore = defineStore('group', () => {
     evictedMessage,
     reconnecting,
     rejoinNow,
+    autoResume,
     getBlockingSession,
     forceTakeover,
     checkRoomConflict,

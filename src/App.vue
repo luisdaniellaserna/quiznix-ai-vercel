@@ -117,9 +117,14 @@ function onGroupPlayerConflict(payload: {
   }
 }
 
-// a join link like ?room=ABC123 drops players straight into the group join flow
+// refresh with a live room: skip the forms and redial it directly; a dead
+// room clears itself and lands on the ended prompt (see autoResume)
 const urlParams = new URLSearchParams(window.location.search)
-if (urlParams.has('room')) {
+const urlRoom = (urlParams.get('room') ?? '').toUpperCase().slice(0, 6) || undefined
+if (groupStore.autoResume(urlRoom)) {
+  status.value = 'group'
+} else if (urlParams.has('room')) {
+  // a join link like ?room=ABC123 drops players straight into the group join flow
   withRoomGuard(() => groupStore.prepareJoin())
   status.value = 'group'
 }
