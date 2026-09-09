@@ -350,7 +350,7 @@ function playAgain() {
             <div class="w-full text-left">
               <LobbyChat />
             </div>
-            <button class="btn btn-ghost" @click="store.cancelStart()">Cancel start</button>
+            <button class="btn btn-soft" @click="store.cancelStart()">Cancel start</button>
           </div>
         </div>
         <aside class="w-full lg:w-80 lg:shrink-0">
@@ -443,7 +443,7 @@ function playAgain() {
           you sure you want to exit?
         </p>
         <div class="modal-action">
-          <button class="btn btn-ghost" @click="exitDialogRef?.close()">Cancel</button>
+          <button class="btn btn-soft" @click="exitDialogRef?.close()">Cancel</button>
           <button class="btn btn-error" @click="confirmExit">Exit quiz</button>
         </div>
       </div>
@@ -460,7 +460,7 @@ function playAgain() {
           They will be removed from the lobby and need the room code to rejoin. Continue?
         </p>
         <div class="modal-action">
-          <button class="btn btn-ghost" @click="cancelKick">Cancel</button>
+          <button class="btn btn-soft" @click="cancelKick">Cancel</button>
           <button class="btn btn-error" @click="confirmKick">Kick player</button>
         </div>
       </div>

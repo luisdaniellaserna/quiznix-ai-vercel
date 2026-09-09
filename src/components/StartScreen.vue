@@ -496,7 +496,7 @@ function start() {
               >
               <div class="flex gap-2">
                 <button class="btn btn-primary btn-sm" @click="resumeHostSession">Reconnect</button>
-                <button class="btn btn-ghost btn-sm" @click="dismissHostResume">Dismiss</button>
+                <button class="btn btn-soft btn-sm" @click="dismissHostResume">Dismiss</button>
               </div>
             </div>
             <p v-if="resumeError" role="alert" class="mt-2 text-sm text-error">{{ resumeError }}</p>
@@ -672,7 +672,7 @@ function start() {
                   {{ item }}
                   <button
                     type="button"
-                    class="btn btn-xs btn-circle btn-ghost min-h-7 min-w-7"
+                    class="btn btn-xs btn-circle btn-soft min-h-7 min-w-7"
                     :aria-label="`Remove ${item}`"
                     @click="removeTopic(index)"
                   >
@@ -773,7 +773,7 @@ function start() {
             <button
               v-if="fromGroupReplay"
               type="button"
-              class="btn btn-ghost"
+              class="btn btn-soft"
               @click="emit('cancel-edit')"
             >
               Back to lobby without changes

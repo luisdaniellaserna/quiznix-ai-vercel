@@ -40,7 +40,7 @@ const emit = defineEmits<{ kick: [playerId: string] }>()
             </span>
             <button
               v-if="isHost"
-              class="btn btn-ghost btn-xs text-error"
+              class="btn btn-soft btn-error btn-xs text-error"
               :aria-label="`Kick ${p.name}`"
               @click="emit('kick', p.playerId)"
             >

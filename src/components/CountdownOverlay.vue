@@ -19,7 +19,7 @@ const countdown = useCountdown(() => props.deadline)
           max="5"
         />
         <p class="text-sm opacity-70">Get ready — first question is coming…</p>
-        <button v-if="cancellable" class="btn btn-ghost btn-sm" @click="emit('cancel')">
+        <button v-if="cancellable" class="btn btn-soft btn-sm" @click="emit('cancel')">
           Cancel start
         </button>
       </div>

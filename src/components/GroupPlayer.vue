@@ -277,7 +277,7 @@ function confirmLeave() {
             >
             <div class="flex gap-2">
               <button class="btn btn-primary btn-sm" @click="resume">Resume</button>
-              <button class="btn btn-ghost btn-sm" @click="dismissResume">Dismiss</button>
+              <button class="btn btn-soft btn-sm" @click="dismissResume">Dismiss</button>
             </div>
           </div>
           <div v-if="store.error" role="alert" class="alert alert-error">
@@ -567,7 +567,7 @@ function confirmLeave() {
           you sure you want to exit the lobby?
         </p>
         <div class="modal-action">
-          <button class="btn btn-ghost" @click="exitDialogRef?.close()">Stay</button>
+          <button class="btn btn-soft" @click="exitDialogRef?.close()">Stay</button>
           <button class="btn btn-error" @click="confirmLeave">Leave lobby</button>
         </div>
       </div>

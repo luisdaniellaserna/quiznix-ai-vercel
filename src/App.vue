@@ -680,7 +680,7 @@ function cancelEditSetup() {
           its place.
         </p>
         <div class="modal-action">
-          <button class="btn btn-ghost" @click="cancelTakeover">Stay in other room</button>
+          <button class="btn btn-soft" @click="cancelTakeover">Stay in other room</button>
           <button class="btn btn-primary" @click="confirmTakeover">
             Leave other &amp; continue
           </button>
