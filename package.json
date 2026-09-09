@@ -11,7 +11,7 @@
     "server": "node server/index.mjs",
     "dev:all": "run-p dev server",
     "predev:all": "node scripts/free-port.mjs 8787",
-    "test:server": "node --test server/",
+    "test:server": "node --test server/*.test.mjs",
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "build-only": "vite build",
