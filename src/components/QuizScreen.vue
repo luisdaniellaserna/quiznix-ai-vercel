@@ -131,7 +131,7 @@ onUnmounted(clearTimer)
           :key="option"
           type="button"
           class="btn btn-outline h-auto min-h-12 w-full justify-start whitespace-normal break-words py-3 text-left"
-          :class="{ 'btn-primary': option === selectedOption }"
+          :class="{ 'btn-primary btn-active': option === selectedOption }"
           @click="selectedOption = option"
         >
           {{ option }}
