@@ -12,6 +12,8 @@ interface QuestionFormat {
   question: string
   correct_answer: string
   incorrect_answers: string[]
+  /** 1-2 sentence explanation of why the correct answer is right. Optional for backward compat. */
+  explanation?: string
 }
 
 interface UserAnswer {
