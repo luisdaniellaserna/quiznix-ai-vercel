@@ -23,6 +23,11 @@ function sentTo(sends, to) {
   return sends.filter((s) => s.to === to).map((s) => s.message)
 }
 
+/** Messages of one type regardless of audience (host and player copies differ). */
+function sentType(sends, type) {
+  return sends.filter((s) => s.message.type === type).map((s) => s.message)
+}
+
 function lastSentTo(sends, to) {
   const messages = sentTo(sends, to)
   return messages[messages.length - 1]
@@ -46,23 +51,6 @@ function readyAll(manager, code) {
 
 function readyClient(manager, clientId) {
   manager.toggleReady(clientId, true)
-}
-
-function startAndBegin(manager, sends, hostId, clock) {
-  manager.startGame(hostId)
-  const starting = sentTo(sends, 'all')
-    .filter((m) => m.type === 'game-starting')
-    .at(-1)
-  if (!starting || starting.type !== 'game-starting') {
-    throw new Error('expected game-starting, got ' + JSON.stringify(starting))
-  }
-  if (clock) {
-    clock.value += 5000
-    manager.processAdvances(clock.value)
-  } else {
-    manager.processAdvances(Date.now() + 6000)
-  }
-  return starting
 }
 
 test('createRoom returns a unique 6-char code and notifies the host', () => {
@@ -222,8 +210,10 @@ test('startGame broadcasts question-started with canonical options and a server 
   assert.ok(sentTo(sends, 'all').some((m) => m.type === 'game-starting'))
   manager.processAdvances(NOW + 5000)
 
-  const qStarted = sentTo(sends, 'all').filter((m) => m.type === 'question-started')
-  assert.deepEqual(qStarted[qStarted.length - 1], {
+  const qStarted = sentType(sends, 'question-started')
+  // players must never hold the answer while the question is open
+  const playerCopy = qStarted[qStarted.length - 1]
+  assert.deepEqual(playerCopy, {
     type: 'question-started',
     index: 0,
     total: 3,
@@ -232,8 +222,11 @@ test('startGame broadcasts question-started with canonical options and a server 
     timerSeconds: TIMER,
     deadline: NOW + TIMER * 1000,
     scoreboard: [{ playerId: 'p-1', name: 'Ana', score: 0, correct: 0 }],
-    correctAnswer: 'C',
   })
+  assert.ok(!('correctAnswer' in playerCopy))
+  const hostCopy = qStarted.find((m) => m.correctAnswer !== undefined)
+  assert.equal(hostCopy?.correctAnswer, 'C')
+  assert.equal(hostCopy?.index, 0)
 })
 
 test('submitAnswer accepts fresh answers, stores the latest, and flags correctness to the host', () => {
@@ -365,7 +358,7 @@ test('nextQuestion advances through questions and finishes with a sorted leaderb
   manager.submitAnswer('player-2', 'A')
   manager.nextQuestion('host-1')
 
-  const startedMsgs = sentTo(sends, 'all').filter((m) => m.type === 'question-started')
+  const startedMsgs = sentType(sends, 'question-started')
   const second = startedMsgs[startedMsgs.length - 1]
   assert.equal(second.type, 'question-started')
   assert.equal(second.index, 1)
@@ -598,13 +591,15 @@ test('player disconnect keeps 5 min grace and rejoins by token with rotation', (
 })
 
 test('sweep removes stale rooms but keeps fresh ones', () => {
-  const { manager } = makeHarness()
+  let nowMs = NOW
+  const { manager } = makeHarness({ now: () => nowMs })
   const stale = manager.createRoom('host-1', {
     topic: 'Old',
     timerSeconds: TIMER,
     maxPlayers: 10,
     questions: makeQuestions(2),
   })
+  nowMs = NOW + 3 * 60 * 60 * 1000
   const fresh = manager.createRoom('host-2', {
     topic: 'New',
     timerSeconds: TIMER,
@@ -612,10 +607,12 @@ test('sweep removes stale rooms but keeps fresh ones', () => {
     questions: makeQuestions(2),
   })
 
-  manager.sweep(NOW + 3 * 60 * 60 * 1000)
+  manager.sweep(nowMs)
 
   assert.throws(() => manager.joinRoom('player-1', stale.code, 'Ana'), /not found/i)
-  assert.throws(() => manager.joinRoom('player-1', fresh.code, 'Ana'), /not found/i)
+  // the fresh room survives and stays joinable
+  const { playerId } = manager.joinRoom('player-1', fresh.code, 'Ana')
+  assert.match(playerId, /^p-/)
 })
 
 test('createRoom rejects invalid participant caps', () => {
@@ -746,11 +743,15 @@ test('nextQuestion delays 3s when host force-skips before everyone answered or t
   manager.processAdvances(currentTime)
   assert.equal(room.phase, 'question')
   assert.equal(room.index, 1)
-  const nextList = sentTo(sends, 'all').filter((m) => m.type === 'question-started')
+  const nextList = sentType(sends, 'question-started')
   const next = nextList[nextList.length - 1]
   assert.equal(next.type, 'question-started')
   assert.equal(next.index, 1)
-  assert.equal(next.correctAnswer, 'C')
+  assert.ok(!('correctAnswer' in next))
+  const hostNext = sentTo(sends, 'host')
+    .filter((m) => m.type === 'question-started')
+    .at(-1)
+  assert.equal(hostNext?.correctAnswer, 'C')
 })
 
 test('nextQuestion advances immediately when all players have answered', () => {
@@ -776,10 +777,12 @@ test('nextQuestion advances immediately when all players have answered', () => {
   manager.submitAnswer('player-2', 'C')
 
   // all answered already triggered an all-answered broadcast; nextQuestion should not delay again
-  const beforeCount = sentTo(sends, 'all').filter((m) => m.type === 'question-started').length
+  const beforeCount = sentType(sends, 'question-started').length
   manager.nextQuestion('host-1')
-  const afterCount = sentTo(sends, 'all').filter((m) => m.type === 'question-started').length
-  assert.equal(afterCount, beforeCount + 1)
+  const afterList = sentType(sends, 'question-started')
+  // every start ships two copies (host + players)
+  assert.equal(afterList.length, beforeCount + 2)
+  assert.equal(afterList.at(-1).index, 1)
   const room = manager.rooms.get(code)
   assert.equal(room.index, 1)
   assert.ok(room.pendingAdvance == null)
@@ -972,7 +975,7 @@ test('backToLobby returns a finished room to the lobby and keeps the roster', ()
         ? now + 5000
         : NOW + 5000,
   )
-  const qList = sentTo(sends, 'all').filter((m) => m.type === 'question-started')
+  const qList = sentType(sends, 'question-started')
   const q = qList[qList.length - 1]
   assert.equal(q.type, 'question-started')
   assert.equal(q.index, 0)
@@ -1031,7 +1034,7 @@ test('updateRoomQuiz replaces lobby content in place and stays in the lobby', ()
         ? now + 5000
         : NOW + 5000,
   )
-  const qList = sentTo(sends, 'all').filter((m) => m.type === 'question-started')
+  const qList = sentType(sends, 'question-started')
   const q = qList[qList.length - 1]
   assert.equal(q.type, 'question-started')
   assert.equal(q.total, 3)
@@ -1345,4 +1348,262 @@ test('beacon leaveSeat frees the seat with a valid secret', () => {
     () => manager.rejoin('player-1b', code, ana.playerId, 'Ana', ana.resumeSecret),
     /No pending slot/i,
   )
+})
+
+test('question-started and player state-sync never carry the correct answer', () => {
+  const { manager, sends } = makeHarness()
+  const { code, hostSecret } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  const ana = manager.joinRoom('player-1', code, 'Ana')
+  readyAll(manager, code)
+  manager.startGame('host-1')
+  manager.processAdvances(NOW + 5000)
+
+  // player drops and rejoins mid-question: the hydrating state-sync is clean
+  manager.playerDisconnected('player-1')
+  const before = sends.length
+  manager.rejoin('player-1b', code, ana.playerId, 'Ana', ana.resumeSecret)
+  const syncs = sends
+    .slice(before)
+    .map((s) => s.message)
+    .filter((m) => m.type === 'state-sync')
+  assert.equal(syncs.length, 1)
+  assert.equal(syncs[0].question.index, 0)
+  assert.ok(!('correctAnswer' in syncs[0].question))
+
+  // host rejoin still gets the answer so the host dashboard can show it
+  manager.rejoinHost('host-2', code, hostSecret)
+  const hostSync = sentTo(sends, 'host')
+    .filter((m) => m.type === 'state-sync')
+    .at(-1)
+  assert.equal(hostSync?.question?.correctAnswer, 'C')
+})
+
+test('host-supplied content is capped (questions, strings, topic, timer)', () => {
+  const { manager } = makeHarness()
+
+  assert.throws(
+    () =>
+      manager.createRoom('host-1', {
+        topic: 'JS',
+        timerSeconds: TIMER,
+        maxPlayers: 10,
+        questions: makeQuestions(101),
+      }),
+    /question set/i,
+  )
+  assert.throws(
+    () =>
+      manager.createRoom('host-1', {
+        topic: 'JS',
+        timerSeconds: TIMER,
+        maxPlayers: 10,
+        questions: [
+          { question: 'x'.repeat(501), correct_answer: 'C', incorrect_answers: ['A'] },
+        ],
+      }),
+    /question set/i,
+  )
+  assert.throws(
+    () =>
+      manager.createRoom('host-1', {
+        topic: 'JS',
+        timerSeconds: TIMER,
+        maxPlayers: 10,
+        questions: [
+          { question: 'Q', correct_answer: 'C', incorrect_answers: ['x'.repeat(101)] },
+        ],
+      }),
+    /question set/i,
+  )
+  assert.throws(
+    () =>
+      manager.createRoom('host-1', {
+        topic: 'JS',
+        timerSeconds: TIMER,
+        maxPlayers: 10,
+        questions: [
+          { question: 'Q', correct_answer: 'C', incorrect_answers: ['A', 'B', 'D', 'E', 'F', 'G', 'H', 'I', 'J'] },
+        ],
+      }),
+    /question set/i,
+  )
+  assert.throws(
+    () =>
+      manager.createRoom('host-1', {
+        topic: 'JS',
+        timerSeconds: 301,
+        maxPlayers: 10,
+        questions: makeQuestions(1),
+      }),
+    /timer/i,
+  )
+
+  // topic is truncated, not rejected — mirrors hostDetail handling
+  const { code } = manager.createRoom('host-1', {
+    topic: 't'.repeat(500),
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(1),
+  })
+  assert.equal(manager.rooms.get(code).topic.length, 120)
+})
+
+test('a second create-room from the same host closes the prior room', () => {
+  const { manager, sends } = makeHarness()
+  const first = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  manager.joinRoom('player-1', first.code, 'Ana')
+
+  const second = manager.createRoom('host-1', {
+    topic: 'Cats',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  assert.notEqual(first.code, second.code)
+  // prior room is gone manager-side; its players were told directly
+  assert.equal(manager.rooms.has(first.code), false)
+  const closed = sentTo(sends, 'players').filter((m) => m.type === 'game-closed')
+  assert.equal(closed.length, 1)
+  // the host binding points at the new room only
+  assert.equal(manager.hostRooms.get('host-1'), second.code)
+  assert.equal(manager.roomOfHost('host-1').code, second.code)
+})
+
+test('room creation is capped globally', () => {
+  const { manager } = makeHarness()
+  let last
+  for (let i = 0; i < 100; i++) {
+    last = manager.createRoom(`host-${i}`, {
+      topic: 'JS',
+      timerSeconds: TIMER,
+      maxPlayers: 10,
+      questions: makeQuestions(1),
+    })
+  }
+  assert.equal(manager.rooms.size, 100)
+  assert.throws(
+    () =>
+      manager.createRoom('host-extra', {
+        topic: 'JS',
+        timerSeconds: TIMER,
+        maxPlayers: 10,
+        questions: makeQuestions(1),
+      }),
+    /Too many active rooms/i,
+  )
+  assert.equal(last.code, manager.roomOfHost('host-99').code)
+})
+
+test('rejoin rejects oversized names; chat relay ids are capped', () => {
+  const { manager, sends } = makeHarness()
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  const ana = manager.joinRoom('player-1', code, 'Ana')
+  manager.playerDisconnected('player-1')
+
+  assert.throws(
+    () => manager.rejoin('player-1b', code, ana.playerId, 'x'.repeat(25), ana.resumeSecret),
+    /1-24 characters/,
+  )
+  // an empty name keeps the stored one
+  const rej = manager.rejoin('player-1b', code, ana.playerId, '', ana.resumeSecret)
+  assert.equal(rej.playerId, ana.playerId)
+  assert.equal(manager.rooms.get(code).players.get(ana.playerId).name, 'Ana')
+
+  manager.sendChat('player-1b', { id: 'i'.repeat(500), text: 'hello' })
+  const chat = sentTo(sends, 'all').filter((m) => m.type === 'chat-received').at(-1)
+  assert.equal(chat.id.length, 64)
+})
+
+test('chatty clients hit the shared rate bucket (chat and answers)', () => {
+  let nowMs = NOW
+  const { manager } = makeHarness({ now: () => nowMs })
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  manager.joinRoom('player-1', code, 'Ana')
+
+  // lobby chat: a burst of 8 passes; the fixed clock means no refill, so #9
+  // is rejected (chat and answers share one bucket per client)
+  for (let i = 0; i < 8; i++) {
+    manager.sendChat('player-1', { id: `c${i}`, text: 'hi' })
+  }
+  assert.throws(() => manager.sendChat('player-1', { id: 'c9', text: 'hi' }), /too often/i)
+
+  // 4000ms refills the full burst; the question phase rate-limits answers too
+  nowMs += 4000
+  readyAll(manager, code)
+  manager.startGame('host-1')
+  nowMs += 5000
+  manager.processAdvances(nowMs)
+
+  for (let i = 0; i < 8; i++) {
+    manager.submitAnswer('player-1', 'A')
+  }
+  assert.throws(() => manager.submitAnswer('player-1', 'A'), /too often/i)
+})
+
+test('joining a second room releases the seat in the first', () => {
+  const { manager } = makeHarness()
+  const a = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  const b = manager.createRoom('host-2', {
+    topic: 'Cats',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  manager.joinRoom('player-1', a.code, 'Ana')
+
+  manager.joinRoom('player-1', b.code, 'Ana')
+
+  const seatA = manager.playersOf(manager.rooms.get(a.code)).find((p) => p.name === 'Ana')
+  const seatB = manager.playersOf(manager.rooms.get(b.code)).find((p) => p.name === 'Ana')
+  assert.equal(seatA.connected, false)
+  assert.equal(seatB.connected, true)
+  const mapping = manager.playerRooms.get('player-1')
+  assert.equal(mapping.code, b.code)
+})
+
+test('creating a room releases the socket player seat', () => {
+  const { manager } = makeHarness()
+  const a = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+  manager.joinRoom('player-1', a.code, 'Ana')
+
+  manager.createRoom('player-1', {
+    topic: 'Cats',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(2),
+  })
+
+  const seatA = manager.playersOf(manager.rooms.get(a.code)).find((p) => p.name === 'Ana')
+  assert.equal(seatA.connected, false)
+  assert.equal(manager.hostRooms.get('player-1') != null, true)
 })

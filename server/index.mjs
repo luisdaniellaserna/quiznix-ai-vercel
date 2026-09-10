@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { networkInterfaces } from 'node:os'
 import http from 'node:http'
 import { WebSocketServer } from 'ws'
-import { RoomManager } from './roomManager.mjs'
+import { RoomManager, RoomError } from './roomManager.mjs'
 
 const PORT = Number(process.env.PORT) || 8787
 const SWEEP_INTERVAL_MS = 30 * 60 * 1000
@@ -36,9 +36,9 @@ function send(clientId, message) {
   }
 }
 
-function sendError(ws, message) {
+function sendError(ws, message, code) {
   if (ws.readyState === ws.OPEN) {
-    ws.send(JSON.stringify({ type: 'error', message }))
+    ws.send(JSON.stringify(code ? { type: 'error', message, code } : { type: 'error', message }))
   }
 }
 
@@ -113,12 +113,17 @@ function handleMessage(ws, raw) {
   try {
     switch (message.type) {
       case 'create-room': {
+        const priorCode = manager.hostRooms.get(clientId)
         const { code } = manager.createRoom(clientId, {
           topic: message.topic,
           timerSeconds: message.timerSeconds,
           maxPlayers: message.maxPlayers,
           questions: message.questions,
         })
+        // the manager closed and deleted the prior room; drop its layer entry
+        if (priorCode && priorCode !== code) {
+          roomClients.delete(priorCode)
+        }
         roomClients.set(code, { hostClientId: clientId, players: new Map() })
         clientInfo.set(clientId, { code, role: 'host' })
         console.log(`[room ${code}] created by host`)
@@ -258,7 +263,9 @@ function handleMessage(ws, raw) {
         sendError(ws, 'Unknown message type.')
     }
   } catch (err) {
-    sendError(ws, err instanceof Error ? err.message : 'Something went wrong.')
+    const message = err instanceof Error ? err.message : 'Something went wrong.'
+    const code = err instanceof RoomError ? err.code : undefined
+    sendError(ws, message, code)
   }
 }
 
@@ -306,7 +313,39 @@ const server = http.createServer((req, res) => {
   res.end(JSON.stringify({ error: 'Not found' }))
 })
 
-const wss = new WebSocketServer({ server })
+// maxPayload bounds a single frame: host question sets are re-broadcast to
+// every client, so one oversized message must never fan out (64 KiB is far
+// above any legitimate quiz payload — validator caps apply on top)
+const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 })
+
+// Cross-Site WebSocket Hijacking: browsers do not preflight ws upgrades, so
+// any page a user visits could dial this server. Require the Origin's hostname
+// to match the Host header's hostname. Port-insensitive on purpose: the vite
+// dev page (:5173) dials the room server (:8787) on the same address, while
+// pages from other hosts (the actual threat) fail the match. Non-browser
+// clients send no Origin and are allowed.
+function originAllowed(req) {
+  const origin = req.headers.origin
+  if (!origin) {
+    return true
+  }
+  try {
+    const originHost = new URL(origin).hostname
+    const hostHostname = new URL(`http://${req.headers.host ?? ''}`).hostname
+    return originHost === hostHostname
+  } catch {
+    return false
+  }
+}
+
+server.on('upgrade', (req, socket, head) => {
+  if (!originAllowed(req)) {
+    socket.write('HTTP/1.1 403 Forbidden\r\n\r\n')
+    socket.destroy()
+    return
+  }
+  wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+})
 
 function heartbeat() {
   this.isAlive = true
