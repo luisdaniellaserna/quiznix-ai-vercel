@@ -21,7 +21,8 @@ export interface StateSyncQuestion {
   options: string[]
   timerSeconds: number
   deadline: number
-  correctAnswer: string
+  /** host syncs only — player syncs get the answer at reveal (all-answered) */
+  correctAnswer?: string
   scoreboard: ScoreboardEntry[]
   /** this seat's locked answer for the current question, if any */
   myAnswer: string | null
@@ -112,7 +113,8 @@ export type GroupServerMessage =
       options: string[]
       timerSeconds: number
       deadline: number
-      correctAnswer: string
+      /** host copies only — players receive the answer at reveal (all-answered) */
+      correctAnswer?: string
       scoreboard: ScoreboardEntry[]
     }
   | { type: 'answer-updated'; playerId: string; name: string; option: string; correct: boolean }
@@ -123,7 +125,7 @@ export type GroupServerMessage =
   | ({ type: 'chat-received' } & ChatMessage)
   | { type: 'game-closed' }
   | { type: 'host-left' }
-  | { type: 'error'; message: string }
+  | { type: 'error'; message: string; code?: string }
 
 export type GroupClientMessage =
   | {

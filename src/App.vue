@@ -13,6 +13,7 @@ import { buildQuizPrompt } from './prompts'
 import { computeScore } from './scoring'
 import { parseJsonResponse } from './jsonParse'
 import { useGroupStore } from './stores/groupStore'
+import { randomId } from './stores/groupTabSync'
 
 const apiKey = import.meta.env.VITE_DEEPSEEK_API_KEY
 
@@ -120,9 +121,14 @@ function onGroupPlayerConflict(payload: {
   }
 }
 
-// a join link like ?room=ABC123 drops players straight into the group join flow
+// refresh with a live room: skip the forms and redial it directly; a dead
+// room clears itself and lands on the ended prompt via the store's handlers
 const urlParams = new URLSearchParams(window.location.search)
-if (urlParams.has('room')) {
+const urlRoom = (urlParams.get('room') ?? '').toUpperCase().slice(0, 6) || undefined
+if (groupStore.autoResume(urlRoom)) {
+  status.value = 'group'
+} else if (urlParams.has('room')) {
+  // a join link like ?room=ABC123 drops players straight into the group join flow
   withRoomGuard(() => groupStore.prepareJoin())
   status.value = 'group'
 }
@@ -325,7 +331,7 @@ async function generateQuestions(topics: string[], mode: Mode, count: number): P
   const history = loadQuestionHistory()
   const recent = history.slice(-QUESTION_EXCLUDE_LIMIT)
   const known = new Set(history.map(normalizeQuestion))
-  const variationSeed = crypto.randomUUID().slice(0, 8)
+  const variationSeed = randomId().slice(0, 8)
   const initial = await deepseekMain(topics, mode, count, recent, variationSeed)
   // Never re-ask a question from a previous quiz, even if the model ignored
   // the exclusion list — treat repeats as missing and fetch replacements.
@@ -363,7 +369,7 @@ async function generateGroupQuestions(
   const history = loadQuestionHistory()
   const recent = history.slice(-QUESTION_EXCLUDE_LIMIT)
   const known = new Set(history.map(normalizeQuestion))
-  const seedBase = crypto.randomUUID().slice(0, 8)
+  const seedBase = randomId().slice(0, 8)
   const perTopic = await Promise.all(
     clean.map((topic, i) =>
       deepseekMain([topic], mode, quotas[i], recent, `${seedBase}-${i}`).then(
