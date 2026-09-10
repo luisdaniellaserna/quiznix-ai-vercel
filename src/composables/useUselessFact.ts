@@ -1,33 +1,35 @@
 import { onMounted, onUnmounted, ref } from 'vue'
+import { CURATED_FACTS, isFactAppropriate } from '../data/curatedFacts'
 
-interface UselessFactResponse {
-  text?: unknown
+const CACHE_KEY = 'quiznix-trivia-fact'
+
+// Pre-filtered once at module load so rotation never touches an unsuitable entry.
+const SAFE_FACTS = CURATED_FACTS.filter(isFactAppropriate)
+const FALLBACK_FACT =
+  SAFE_FACTS[0] ?? 'Honey never spoils — archaeologists have tasted 3,000-year-old honey.'
+
+function shuffledIndexes(): number[] {
+  const order = SAFE_FACTS.map((_, i) => i)
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[order[i], order[j]] = [order[j]!, order[i]!]
+  }
+  return order
 }
 
-const API_URL = 'https://uselessfacts.jsph.pl/api/v2/facts/random?language=en'
-const CACHE_KEY = 'quiznix-trivia-fact'
-const FETCH_TIMEOUT_MS = 3000
-
-// Instant first paint while the API is in flight — also the offline fallback.
-const FALLBACK_FACTS = [
-  'Honey never spoils. Archaeologists have tasted 3,000-year-old honey from Egyptian tombs.',
-  'Octopuses have three hearts and blue blood.',
-  'Bananas are berries, but strawberries are not.',
-  'A day on Venus is longer than its year.',
-  'Sharks existed before trees.',
-  'The Eiffel Tower grows about 15 cm taller in summer.',
-  'Sea otters hold hands while sleeping so they do not drift apart.',
-  'Wombat poop is cube-shaped.',
-]
-
-function randomFallback(): string {
-  return FALLBACK_FACTS[Math.floor(Math.random() * FALLBACK_FACTS.length)]!
+function randomFact(except?: string): string {
+  const pool = SAFE_FACTS.filter((f) => f !== except)
+  const source = pool.length > 0 ? pool : SAFE_FACTS
+  return source[Math.floor(Math.random() * source.length)] ?? FALLBACK_FACT
 }
 
 function loadCached(): string | null {
   try {
     const raw = localStorage.getItem(CACHE_KEY)
-    if (raw && raw.trim() !== '') return raw
+    // Legacy cache may hold a fact from the old unmoderated API — only reuse
+    // it when it passes today's content filter, otherwise discard it.
+    if (raw && isFactAppropriate(raw)) return raw.trim()
+    if (raw) localStorage.removeItem(CACHE_KEY)
   } catch {
     /* storage unavailable — fall through to a hardcoded fact */
   }
@@ -42,49 +44,37 @@ function saveCached(fact: string): void {
   }
 }
 
-async function fetchRandomFact(signal: AbortSignal): Promise<string | null> {
-  const response = await fetch(API_URL, { signal })
-  if (!response.ok) return null
-  const data = (await response.json()) as UselessFactResponse
-  const text = typeof data.text === 'string' ? data.text.trim() : ''
-  return text === '' ? null : text
-}
-
 /**
- * Rotating "Did you know?" trivia. Never throws and never blocks — the fact
- * starts as a cached/hardcoded value and upgrades to the API value when it
- * arrives. Rotation only runs while the consumer is mounted.
+ * Rotating "Did you know?" trivia from a moderated, general-audience bank
+ * (see `src/data/curatedFacts.ts`). Never throws, never blocks, never hits
+ * the network — the fact starts as a cached/curated value and rotates on a
+ * timer while the consumer is mounted. Rotation never repeats the outgoing
+ * fact back-to-back.
  *
  * Set `refreshOnMount: false` (with `intervalMs: 0`) for a stable one-fact
- * display such as the loading screen — it shows the prefetched cached fact
- * with no mid-read swap. Rotation stays on for long waits like the lobby.
+ * display such as the loading screen. Rotation stays on for long waits like
+ * the lobby.
  */
 export function useUselessFact(intervalMs = 10000, options: { refreshOnMount?: boolean } = {}) {
   const { refreshOnMount = true } = options
-  const fact = ref<string>(loadCached() ?? randomFallback())
+  const fact = ref<string>(loadCached() ?? randomFact())
   let timer: ReturnType<typeof setInterval> | null = null
-  let fetching = false
   let disposed = false
-  let controller: AbortController | null = null
+  let queue = shuffledIndexes()
 
-  async function refresh() {
-    if (fetching || disposed) return
-    fetching = true
-    controller = new AbortController()
-    const timeout = window.setTimeout(() => controller?.abort(), FETCH_TIMEOUT_MS)
-    try {
-      const text = await fetchRandomFact(controller.signal)
-      // Assign only when the text actually differs — avoids a visible
-      // flicker/re-render when the API returns the cached fact again.
-      if (text && !disposed && text !== fact.value) {
-        fact.value = text
-        saveCached(text)
-      }
-    } catch {
-      /* keep the current fact — trivia must never break the quiz flow */
-    } finally {
-      window.clearTimeout(timeout)
-      fetching = false
+  function next(): void {
+    if (disposed || SAFE_FACTS.length === 0) return
+    if (queue.length === 0) queue = shuffledIndexes()
+    let candidate = SAFE_FACTS[queue.shift()!]!
+    // Never show the same fact twice in a row (matters when the deck reshuffles).
+    if (candidate === fact.value && SAFE_FACTS.length > 1) {
+      if (queue.length === 0) queue = shuffledIndexes()
+      candidate = SAFE_FACTS[queue.shift()!]!
+      if (candidate === fact.value) candidate = randomFact(fact.value)
+    }
+    if (candidate !== fact.value) {
+      fact.value = candidate
+      saveCached(candidate)
     }
   }
 
@@ -94,16 +84,15 @@ export function useUselessFact(intervalMs = 10000, options: { refreshOnMount?: b
       clearInterval(timer)
       timer = null
     }
-    controller?.abort()
   }
 
   onMounted(() => {
     disposed = false
     if (refreshOnMount) {
-      void refresh()
+      next()
     }
     if (intervalMs > 0) {
-      timer = setInterval(() => void refresh(), intervalMs)
+      timer = setInterval(next, intervalMs)
     }
   })
   onUnmounted(stop)
@@ -112,27 +101,19 @@ export function useUselessFact(intervalMs = 10000, options: { refreshOnMount?: b
 }
 
 /**
- * Background prefetch — call while the user is idle (e.g. start-screen mount)
- * so the loading screen opens with a fresh cached fact and needs no mount
- * refresh. Dedupes concurrent calls and never throws.
+ * Background prime — call while the user is idle (e.g. start-screen mount)
+ * so the loading screen opens with a validated cached fact. Never throws.
  */
-let inflightPrefetch: Promise<void> | null = null
+let primed = false
 
 export function prefetchUselessFact(): Promise<void> {
-  if (!inflightPrefetch) {
-    const controller = new AbortController()
-    const timeout = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
-    inflightPrefetch = fetchRandomFact(controller.signal)
-      .then((text) => {
-        if (text) saveCached(text)
-      })
-      .catch(() => {
-        /* offline/API down — cached/hardcoded fact covers it */
-      })
-      .finally(() => {
-        window.clearTimeout(timeout)
-        inflightPrefetch = null
-      })
+  if (!primed) {
+    primed = true
+    try {
+      if (!loadCached()) saveCached(randomFact())
+    } catch {
+      /* trivia degrades to the hardcoded fallback */
+    }
   }
-  return inflightPrefetch
+  return Promise.resolve()
 }
