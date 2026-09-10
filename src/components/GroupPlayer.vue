@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import { computed, nextTick, ref, watch } from 'vue'
-import { useGroupStore } from '../stores/groupStore'
+import { Icon } from '@iconify/vue'
+import { roomServerOrigin, useGroupStore } from '../stores/groupStore'
 import { useCountdown } from '../composables/useCountdown'
 import SettingsMenu from './SettingsMenu.vue'
 import ConfettiBurst from './ConfettiBurst.vue'
@@ -37,6 +38,56 @@ const joinCode = ref((params.get('room') ?? '').toUpperCase().slice(0, 6))
 const playerName = ref('')
 const joining = ref(false)
 const resumeOffer = ref(store.getResumeOffer())
+const copied = ref(false)
+const qrDialogRef = ref<HTMLDialogElement | null>(null)
+const joinUrl = ref('')
+
+let resolvedLanHost: string | null = null
+
+async function resolveLanHost() {
+  if (resolvedLanHost) {
+    return resolvedLanHost
+  }
+  try {
+    const response = await fetch(`${roomServerOrigin()}/lan`, {
+      signal: AbortSignal.timeout(2000),
+    })
+    const data = (await response.json()) as { addresses: string[] }
+    resolvedLanHost = data.addresses[0] ?? null
+  } catch {
+    resolvedLanHost = null
+  }
+  return resolvedLanHost
+}
+
+// same LAN-aware join link as the host view so phones can open it
+async function joinLink() {
+  const hostname = window.location.hostname
+  const isLoopback = hostname === 'localhost' || hostname === '127.0.0.1'
+  const host = isLoopback ? ((await resolveLanHost()) ?? hostname) : hostname
+  const port = window.location.port ? `:${window.location.port}` : ''
+  return `${window.location.protocol}//${host}${port}${window.location.pathname}?room=${store.roomCode}`
+}
+
+async function copyLink() {
+  try {
+    await navigator.clipboard.writeText(await joinLink())
+    copied.value = true
+    window.setTimeout(() => (copied.value = false), 1500)
+  } catch {
+    /* clipboard unavailable — the code itself is shown on screen */
+  }
+}
+
+const qrSrc = computed(
+  () =>
+    `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(joinUrl.value)}`,
+)
+
+async function openQr() {
+  joinUrl.value = await joinLink()
+  qrDialogRef.value?.showModal()
+}
 
 function resume() {
   const offer = resumeOffer.value
@@ -217,21 +268,18 @@ function confirmLeave() {
     <header class="navbar bg-base-200 px-4 py-4 shadow-sm">
       <div class="navbar-start">
         <span class="text-xl font-bold">Quiznix AI</span>
-        <span v-if="store.roomCode" class="badge badge-soft badge-primary badge-sm mx-2">
-          Room {{ store.roomCode }}
-        </span>
       </div>
       <div class="navbar-end">
         <SettingsMenu />
       </div>
     </header>
 
-    <main class="mx-auto w-full max-w-5xl p-4">
+    <main class="mx-auto w-full max-w-6xl p-4">
       <!-- closed by the host or a lost connection — also shown as modal -->
       <div v-if="store.phase === 'closed'" class="card mt-4 shadow-xl">
         <div class="card-body items-center text-center">
           <h2 class="text-xl font-bold">{{ store.closedMessage }}</h2>
-          <button class="btn btn-primary" @click="done">Back to home</button>
+          <button class="btn btn-soft btn-primary" @click="done">Back to home</button>
         </div>
       </div>
 
@@ -254,10 +302,10 @@ function confirmLeave() {
           <p class="text-center font-medium opacity-70">{{ store.topic }}</p>
           <FinalLeaderboard :entries="store.leaderboard ?? []" :highlight-name="store.playerName" />
           <div class="mt-4 grid gap-2">
-            <button class="btn btn-outline w-full" @click="store.returnToLobby()">
+            <button class="btn btn-soft w-full" @click="store.returnToLobby()">
               Back to lobby
             </button>
-            <button class="btn btn-primary w-full" @click="done">Done</button>
+            <button class="btn btn-soft btn-primary w-full" @click="done">Done</button>
           </div>
         </div>
       </div>
@@ -276,7 +324,7 @@ function confirmLeave() {
               >? Your seat may still be held.</span
             >
             <div class="flex gap-2">
-              <button class="btn btn-primary btn-sm" @click="resume">Resume</button>
+              <button class="btn btn-soft btn-primary btn-sm" @click="resume">Resume</button>
               <button class="btn btn-soft btn-sm" @click="dismissResume">Dismiss</button>
             </div>
           </div>
@@ -306,63 +354,104 @@ function confirmLeave() {
               class="input input-bordered input-lg w-full rounded-xl focus:outline-none"
             />
           </label>
-          <button class="btn btn-primary btn-lg" :disabled="!canJoin || joining" @click="join">
+          <button class="btn btn-soft btn-primary btn-lg" :disabled="!canJoin || joining" @click="join">
             {{ joining ? 'Joining…' : 'Join game' }}
           </button>
         </div>
       </div>
 
-      <!-- lobby: waiting for the host -->
-      <div
-        v-else-if="store.phase === 'lobby'"
-        class="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start"
-      >
-        <div class="card flex-1 shadow-xl">
-          <div class="card-body items-center gap-4 text-center">
-            <h2 class="text-2xl font-black">You're in!</h2>
-            <div class="w-full">
-              <ConnectionBanner />
+      <!-- lobby: player dashboard mirroring the host view — controls/code, trivia, chat -->
+      <div v-else-if="store.phase === 'lobby'" class="mt-4 space-y-4">
+        <ConnectionBanner />
+        <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
+          <div class="card shadow-xl">
+            <div class="card-body gap-0 p-0">
+              <section
+                class="flex flex-col gap-6 p-6 text-left md:flex-row md:items-stretch"
+              >
+                <div class="flex min-w-0 flex-col gap-3 md:basis-2/5">
+                  <span class="text-sm font-bold uppercase leading-none tracking-wider opacity-70"
+                    >Room code</span
+                  >
+                  <div
+                    class="break-all text-3xl font-black leading-none tracking-[0.2em] sm:text-4xl"
+                  >
+                    {{ store.roomCode }}
+                  </div>
+                  <div class="mt-2 flex flex-col items-stretch gap-2">
+                    <button class="btn btn-soft btn-sm w-full" @click="copyLink">
+                      <Icon
+                        :icon="copied ? 'lucide:check' : 'lucide:copy'"
+                        class="h-4 w-4 shrink-0"
+                        aria-hidden="true"
+                      />
+                      {{ copied ? 'Copied!' : 'Copy join link' }}
+                    </button>
+                    <button class="btn btn-soft btn-sm w-full" @click="openQr">
+                      <Icon icon="lucide:qr-code" class="h-4 w-4 shrink-0" aria-hidden="true" />
+                      Show QR code
+                    </button>
+                  </div>
+                </div>
+                <div class="divider m-0 md:divider-horizontal"></div>
+                <div class="flex min-w-0 flex-col gap-3 md:basis-3/5">
+                  <span class="text-sm font-bold uppercase leading-none tracking-wider opacity-70"
+                    >Your status</span
+                  >
+                  <div class="w-full">
+                    <LobbyStatusBanner
+                      :status="store.hostStatus"
+                      :detail="store.hostDetail"
+                      :topic="store.topic"
+                      :quiz-ready="store.quizReady"
+                      :host-online="store.hostOnline"
+                      :host-offline-expires-at="store.hostOfflineExpiresAt"
+                    />
+                  </div>
+                  <p v-if="store.error" role="alert" class="alert alert-error text-sm">
+                    {{ store.error }}
+                  </p>
+                  <p
+                    v-if="store.players.length === 0 || store.readyCount !== store.players.length"
+                    class="text-sm opacity-70"
+                  >
+                    Waiting for players to get ready
+                  </p>
+                  <p v-else class="text-sm opacity-70">Waiting for the host to start the game</p>
+                  <div class="mt-2 flex flex-col gap-2">
+                    <button
+                      class="btn btn-lg w-full"
+                      :class="store.myReady ? 'btn-success' : 'btn-primary'"
+                      :disabled="!store.quizReady"
+                      @click="store.toggleReady(!store.myReady)"
+                    >
+                      {{ store.myReady ? '✓ Ready — tap to unready' : "I'm Ready" }}
+                    </button>
+                    <button class="btn btn-outline btn-error w-full" @click="requestLeave">
+                      Leave lobby
+                    </button>
+                  </div>
+                </div>
+              </section>
+              <div class="divider m-0"></div>
+              <section class="p-6">
+                <TriviaCard :interval-ms="10000" />
+              </section>
+              <div class="divider m-0"></div>
+              <section class="p-6">
+                <LobbyChat />
+              </section>
             </div>
-            <div class="w-full">
-              <LobbyStatusBanner
-                :status="store.hostStatus"
-                :detail="store.hostDetail"
-                :topic="store.topic"
-                :quiz-ready="store.quizReady"
-                :host-online="store.hostOnline"
-                :host-offline-expires-at="store.hostOfflineExpiresAt"
-              />
-            </div>
-            <p v-if="store.error" role="alert" class="alert alert-error text-sm">
-              {{ store.error }}
-            </p>
-            <button
-              class="btn btn-lg w-full"
-              :class="store.myReady ? 'btn-success' : 'btn-primary'"
-              :disabled="!store.quizReady"
-              @click="store.toggleReady(!store.myReady)"
-            >
-              {{ store.myReady ? '✓ Ready — tap to unready' : "I'm Ready" }}
-            </button>
-            <p class="text-sm opacity-70">
-              {{ store.readyCount }} / {{ store.players.length }} ready · host starts when 100%
-              ready
-            </p>
-            <div class="w-full text-left">
-              <LobbyChat />
-            </div>
-            <TriviaCard :interval-ms="10000" />
-            <button class="btn btn-error btn-outline" @click="requestLeave">Leave lobby</button>
           </div>
+          <aside class="lg:sticky lg:top-4">
+            <LobbyRoster
+              :players="store.players"
+              :max-players="store.maxPlayers"
+              :self-id="store.playerId"
+              :is-host="false"
+            />
+          </aside>
         </div>
-        <aside class="w-full lg:w-80 lg:shrink-0">
-          <LobbyRoster
-            :players="store.players"
-            :max-players="store.maxPlayers"
-            :self-id="store.playerId"
-            :is-host="false"
-          />
-        </aside>
       </div>
 
       <!-- starting countdown -->
@@ -435,7 +524,7 @@ function confirmLeave() {
               <button
                 v-for="option in shuffledOptions"
                 :key="option"
-                class="btn btn-lg h-auto min-h-12 justify-start whitespace-normal break-words py-3 text-left rounded-xl"
+                class="btn btn-soft btn-lg h-auto min-h-12 justify-start whitespace-normal break-words py-3 text-left rounded-xl"
                 :class="{
                   'btn-success': isRevealed && option === store.correctAnswer,
                   'btn-error':
@@ -444,8 +533,6 @@ function confirmLeave() {
                     !isRevealed && (selectedOption === option || store.myAnswer === option),
                   'btn-active':
                     !isRevealed && (selectedOption === option || store.myAnswer === option),
-                  'btn-outline':
-                    !isRevealed && selectedOption !== option && store.myAnswer !== option,
                   'opacity-60':
                     isRevealed && option !== store.correctAnswer && option !== store.myAnswer,
                 }"
@@ -456,7 +543,7 @@ function confirmLeave() {
               </button>
             </div>
             <button
-              class="btn btn-primary btn-lg w-full"
+              class="btn btn-soft btn-primary btn-lg w-full"
               :disabled="!selectedOption || hasSubmitted || countdown.expired.value"
               @click="submitAnswer"
             >
@@ -558,6 +645,35 @@ function confirmLeave() {
       </div>
     </main>
 
+    <!-- join QR code -->
+    <dialog ref="qrDialogRef" class="modal">
+      <div class="modal-box items-center text-center">
+        <h3 class="text-lg font-bold">Scan to join</h3>
+        <p class="py-2 text-sm opacity-70">
+          Room <strong class="tracking-[0.2em]">{{ store.roomCode }}</strong>
+        </p>
+        <img
+          v-if="joinUrl"
+          :src="qrSrc"
+          alt="QR code with the link to join this room"
+          class="mx-auto h-55 w-55 rounded-xl border border-base-300 bg-white p-2"
+          loading="lazy"
+          width="220"
+          height="220"
+        />
+        <p class="mt-2 truncate px-4 text-xs opacity-60">{{ joinUrl }}</p>
+        <div class="modal-action justify-center">
+          <button class="btn btn-soft" @click="qrDialogRef?.close()">Close</button>
+          <button class="btn btn-soft" @click="copyLink">
+            {{ copied ? 'Copied!' : 'Copy join link' }}
+          </button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+      </form>
+    </dialog>
+
     <!-- leave-lobby verification -->
     <dialog ref="exitDialogRef" class="modal">
       <div class="modal-box">
@@ -568,7 +684,7 @@ function confirmLeave() {
         </p>
         <div class="modal-action">
           <button class="btn btn-soft" @click="exitDialogRef?.close()">Stay</button>
-          <button class="btn btn-error" @click="confirmLeave">Leave lobby</button>
+          <button class="btn btn-soft btn-error" @click="confirmLeave">Leave lobby</button>
         </div>
       </div>
       <form method="dialog" class="modal-backdrop">
@@ -584,7 +700,7 @@ function confirmLeave() {
           {{ store.closedMessage || 'The host ended the quiz.' }}
         </p>
         <div class="modal-action justify-center">
-          <button class="btn btn-primary" @click="done">Back to home</button>
+          <button class="btn btn-soft btn-primary" @click="done">Back to home</button>
         </div>
       </div>
       <form method="dialog" class="modal-backdrop">
