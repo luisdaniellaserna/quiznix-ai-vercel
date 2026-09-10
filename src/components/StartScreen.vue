@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import pkg from '../../package.json'
 import { MODE_CONFIG, type GameMode, type Mode } from '../quizConfig'
 import SettingsMenu from './SettingsMenu.vue'
 import { prefetchUselessFact } from '../composables/useUselessFact'
@@ -20,6 +21,8 @@ onUnmounted(() => {
 })
 
 const groupStore = useGroupStore()
+
+const appVersion = `v${pkg.version}`
 
 const emit = defineEmits<{
   'start-quiz': [
@@ -422,6 +425,10 @@ function start() {
         </div>
       </div>
     </section>
+
+    <p v-if="step === 'landing'" class="fixed bottom-3 left-4 z-10 text-xs opacity-50">
+      {{ appVersion }}
+    </p>
 
     <!-- game mode picker (replaces hero content after clicking start) -->
     <section
