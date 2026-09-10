@@ -695,6 +695,16 @@ export const useGroupStore = defineStore('group', () => {
         break
       case 'error': {
         const text = message.message
+        // A stale host socket re-registering while the live host binding holds
+        // the room is told "Host already connected." — expected after a rebind
+        // elsewhere, with nothing to act on. Never surface it in host view.
+        if (role.value === 'host' && /host already connected/i.test(text)) {
+          error.value = ''
+          if (phase.value === 'connecting') {
+            phase.value = 'idle'
+          }
+          break
+        }
         error.value = text
         const gone = /not found/i.test(text) && roomCode.value !== ''
         // failed join/create should return to the form instead of staying stuck on loading
@@ -920,6 +930,16 @@ export const useGroupStore = defineStore('group', () => {
   }
 
   function closeRoom() {
+    // Intentional destroy: send directly when possible. The generic send()
+    // would queue behind a reconnect, and the leave() that follows a host
+    // Exit clears the queue — silently dropping the destroy while the room
+    // lingers server-side until grace expiry.
+    try {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'close-room' }))
+        return
+      }
+    } catch {}
     send({ type: 'close-room' })
   }
 

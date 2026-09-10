@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { MODE_CONFIG, type GameMode, type Mode } from '../quizConfig'
 import SettingsMenu from './SettingsMenu.vue'
 import { prefetchUselessFact } from '../composables/useUselessFact'
@@ -7,7 +7,17 @@ import { useGroupStore } from '../stores/groupStore'
 
 // Warm the trivia cache while the user fills the form, so the loading screen
 // opens with a fresh fact and shows it stably (no mid-read swap).
-onMounted(() => prefetchUselessFact())
+onMounted(() => {
+  prefetchUselessFact()
+  refreshHostResumeOffer()
+  window.addEventListener('focus', refreshHostResumeOffer)
+  window.addEventListener('storage', refreshHostResumeOffer)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('focus', refreshHostResumeOffer)
+  window.removeEventListener('storage', refreshHostResumeOffer)
+})
 
 const groupStore = useGroupStore()
 
@@ -52,12 +62,28 @@ const joinName = ref('')
 const joinCodeFromUrl =
   new URLSearchParams(window.location.search).get('room')?.toUpperCase().slice(0, 6) ?? ''
 
-const hostResumeOffer = ref(
-  (() => {
-    const offer = groupStore.getResumeOffer()
-    return offer && offer.role === 'host' ? offer : null
-  })(),
-)
+const resumeRefresh = ref(0)
+function refreshHostResumeOffer() {
+  resumeRefresh.value++
+}
+
+// Reactive host-resume offer: localStorage is not reactive, so re-read it on
+// mount, step changes, and window focus/storage events. Suppressed while this
+// tab already holds a live host room (e.g. the edit-setup flow keeps the room
+// open — offering to "rejoin" it would be wrong).
+const hostResumeOffer = computed(() => {
+  void resumeRefresh.value
+  if (
+    groupStore.role === 'host' &&
+    (groupStore.phase === 'lobby' ||
+      groupStore.phase === 'starting' ||
+      groupStore.phase === 'question')
+  ) {
+    return null
+  }
+  const offer = groupStore.getResumeOffer()
+  return offer && offer.role === 'host' ? offer : null
+})
 const resumeError = ref('')
 
 function resumeHostSession() {
@@ -69,8 +95,11 @@ function resumeHostSession() {
 
 function dismissHostResume() {
   if (hostResumeOffer.value) groupStore.discardResume(hostResumeOffer.value.code)
-  hostResumeOffer.value = null
+  refreshHostResumeOffer()
 }
+
+// the mirror can land after mount (reconnect, other tab) — re-check on step changes
+watch(step, () => refreshHostResumeOffer())
 
 const allTopics = computed(() => extraTopics.value.filter((item) => item !== ''))
 
@@ -632,6 +661,20 @@ function start() {
             >
               <span class="text-primary">▣</span> Set up your {{ gameMode }} quiz
             </div>
+          </div>
+
+          <div v-if="hostResumeOffer && gameMode === 'group'" class="px-6 pt-6 sm:px-10 sm:pt-8">
+            <div class="alert alert-info text-sm">
+              <span
+                >Your room <strong>{{ hostResumeOffer.code }}</strong> may still be live. Rejoin as
+                host?</span
+              >
+              <div class="flex gap-2">
+                <button class="btn btn-primary btn-sm" @click="resumeHostSession">Reconnect</button>
+                <button class="btn btn-warning btn-sm" @click="dismissHostResume">Dismiss</button>
+              </div>
+            </div>
+            <p v-if="resumeError" role="alert" class="mt-2 text-sm text-error">{{ resumeError }}</p>
           </div>
 
           <!-- setup form -->
