@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { Icon } from '@iconify/vue'
 import type { HostStatus } from '../stores/groupStore'
 
 const props = defineProps<{
@@ -57,8 +58,21 @@ const label = computed(() => {
 </script>
 
 <template>
-  <div class="alert py-2" :class="status === 'countdown' ? 'alert-error' : 'alert-info'">
+  <div v-if="status === 'countdown'" class="alert alert-error py-2">
     <span class="text-sm font-medium">{{ label }}</span>
+  </div>
+  <div
+    v-else-if="!quizReady || status === 'generating' || status === 'choosing-topic'"
+    class="alert alert-info py-2"
+  >
+    <span class="text-sm font-medium">{{ label }}</span>
+  </div>
+  <div
+    v-else
+    class="flex items-center justify-center gap-2 rounded-xl border border-base-300 bg-base-100 px-4 py-2"
+  >
+    <Icon icon="lucide:clock" class="h-4 w-4 shrink-0 opacity-60" aria-hidden="true" />
+    <span class="text-sm font-medium opacity-60">{{ label }}</span>
   </div>
   <div v-if="hostOnline === false" class="alert alert-warning py-2">
     <span class="text-sm font-medium">

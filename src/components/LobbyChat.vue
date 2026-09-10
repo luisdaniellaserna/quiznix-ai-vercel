@@ -41,13 +41,28 @@ function send() {
 </script>
 
 <template>
-  <div class="card bg-base-200/60 shadow-xl">
-    <div class="card-body gap-3 p-4">
+  <div class="rounded-2xl bg-base-200/60">
+    <div class="flex flex-col gap-3 p-4">
       <h3 class="text-sm font-bold tracking-wider uppercase opacity-70">Group chat</h3>
-      <div ref="listRef" class="max-h-56 space-y-2 overflow-y-auto pr-1" @scroll="onScroll">
-        <p v-if="store.chatMessages.length === 0" class="text-sm opacity-60">
-          No messages yet — say hi to the room!
+      <div
+        v-if="store.chatMessages.length === 0"
+        class="rounded-xl border border-dashed border-base-300 px-4 py-3 text-center"
+      >
+        <p class="text-sm opacity-60">No messages yet — say hi to the room!</p>
+        <p v-if="store.players.length === 0" class="mt-1 text-xs opacity-50">
+          Share the code — chat wakes up once players arrive.
         </p>
+        <p v-else class="mt-1 text-xs opacity-50">
+          {{ store.players.length }} player{{ store.players.length === 1 ? '' : 's' }} here —
+          break the ice.
+        </p>
+      </div>
+      <div
+        v-else
+        ref="listRef"
+        class="max-h-56 space-y-2 overflow-y-auto pr-1"
+        @scroll="onScroll"
+      >
         <div
           v-for="m in store.chatMessages"
           :key="m.id"
@@ -76,7 +91,7 @@ function send() {
           class="input input-bordered input-sm flex-1"
           autocomplete="off"
         />
-        <button type="submit" class="btn btn-primary btn-sm" :disabled="!draft.trim()">Send</button>
+        <button type="submit" class="btn btn-soft btn-primary btn-sm" :disabled="!draft.trim()">Send</button>
       </form>
       <p class="text-xs opacity-50">Lobby-only · history stays in this browser</p>
     </div>

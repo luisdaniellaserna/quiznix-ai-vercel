@@ -82,9 +82,9 @@ const { fact } = useUselessFact(props.intervalMs, {
 
   <div
     v-else
-    class="card mx-auto w-full max-w-xl overflow-hidden rounded-2xl border border-base-300 bg-base-200 shadow-sm"
+    class="w-full overflow-hidden rounded-2xl border border-base-300 bg-base-200/60"
   >
-    <div class="card-body flex flex-row items-center gap-4 p-6 text-left">
+    <div class="flex flex-row items-center gap-4 p-4 text-left">
       <!-- Icon / Visual Accent -->
       <div class="shrink-0 rounded-xl bg-primary/10 p-3 text-primary">
         <svg
