@@ -58,12 +58,14 @@ const reportEmail = (import.meta.env.VITE_REPORT_EMAIL as string | undefined)?.t
 const props = withDefaults(
   defineProps<{
     showQuit?: boolean
+    showExit?: boolean
   }>(),
   {
     showQuit: false,
+    showExit: false,
   },
 )
-const emit = defineEmits(['quit-quiz'])
+const emit = defineEmits(['quit-quiz', 'exit-quiz'])
 
 const dropdownRef = ref<HTMLDetailsElement | null>(null)
 const themeDialogRef = ref<HTMLDialogElement | null>(null)
@@ -122,6 +124,11 @@ function askQuit() {
   quitDialogRef.value?.showModal()
 }
 
+function requestExit() {
+  closeDropdown()
+  emit('exit-quiz')
+}
+
 function confirmQuit() {
   quitDialogRef.value?.close()
   emit('quit-quiz')
@@ -134,7 +141,7 @@ onUnmounted(() => {
 
 <template>
   <details ref="dropdownRef" class="dropdown dropdown-end" @toggle="lockPageScroll">
-    <summary class="btn btn-soft btn-circle group min-h-11 min-w-11" aria-label="Settings">
+    <summary class="btn btn-ghost btn-circle group min-h-11 min-w-11" aria-label="Settings">
       <Icon
         icon="lucide:settings"
         class="h-5 w-5 transition-transform duration-300 group-hover:rotate-90"
@@ -149,21 +156,21 @@ onUnmounted(() => {
       </h2>
       <div class="space-y-0.5">
         <button
-          class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-base-300/50"
+          class="btn btn-ghost btn-sm w-full justify-start"
           @click="openMenu('theme')"
         >
           <Icon icon="lucide:palette" class="h-4 w-4 shrink-0 opacity-80" />
           Change Theme
         </button>
         <button
-          class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-base-300/50"
+          class="btn btn-ghost btn-sm w-full justify-start"
           @click="openMenu('help')"
         >
           <Icon icon="lucide:circle-question-mark" class="h-4 w-4 shrink-0 opacity-80" />
           Help
         </button>
         <button
-          class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-error hover:bg-base-300/50"
+          class="btn btn-ghost btn-error btn-sm w-full justify-start"
           v-if="props.showQuit"
           @click="askQuit"
         >
@@ -172,11 +179,19 @@ onUnmounted(() => {
         </button>
         <div v-if="props.showQuit" class="my-1 h-px bg-base-300"></div>
         <button
-          class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-base-300/50"
+          class="btn btn-ghost btn-sm w-full justify-start"
           @click="openMenu('report')"
         >
           <Icon icon="lucide:flag" class="h-4 w-4 shrink-0 opacity-80" />
           Report
+        </button>
+        <button
+          v-if="props.showExit"
+          class="btn btn-ghost btn-error btn-sm w-full justify-start"
+          @click="requestExit"
+        >
+          <Icon icon="lucide:log-out" class="h-4 w-4 shrink-0 opacity-80" />
+          Exit quiz
         </button>
       </div>
     </div>
@@ -188,7 +203,7 @@ onUnmounted(() => {
       <div class="flex items-center justify-between">
         <h3 class="text-lg font-bold">Change Theme</h3>
         <button
-          class="btn btn-soft btn-circle min-h-11 min-w-11"
+          class="btn btn-ghost btn-circle min-h-11 min-w-11"
           aria-label="Close"
           @click="themeDialogRef?.close()"
         >
@@ -240,7 +255,7 @@ onUnmounted(() => {
       <div class="flex items-center justify-between">
         <h3 class="text-lg font-bold">Help</h3>
         <button
-          class="btn btn-soft btn-circle min-h-11 min-w-11"
+          class="btn btn-ghost btn-circle min-h-11 min-w-11"
           aria-label="Close"
           @click="helpDialogRef?.close()"
         >
@@ -284,7 +299,7 @@ onUnmounted(() => {
       <div class="flex items-center justify-between">
         <h3 class="text-lg font-bold">Report a problem</h3>
         <button
-          class="btn btn-soft btn-circle min-h-11 min-w-11"
+          class="btn btn-ghost btn-circle min-h-11 min-w-11"
           aria-label="Close"
           @click="reportDialogRef?.close()"
         >
@@ -303,9 +318,9 @@ onUnmounted(() => {
         hit send.
       </p>
       <div class="modal-action">
-        <button class="btn btn-soft" @click="reportDialogRef?.close()">Cancel</button>
+        <button class="btn btn-ghost" @click="reportDialogRef?.close()">Cancel</button>
         <button
-          class="btn btn-primary"
+          class="btn btn-ghost btn-primary"
           :disabled="reportDetail.trim() === ''"
           @click="submitReport"
         >
@@ -324,8 +339,8 @@ onUnmounted(() => {
       <h3 class="text-lg font-bold">Quit quiz?</h3>
       <p class="py-4">Your progress will be lost. Are you sure you want to quit?</p>
       <div class="modal-action">
-        <button class="btn" @click="quitDialogRef?.close()">Cancel</button>
-        <button class="btn btn-error" @click="confirmQuit">Yes, quit</button>
+        <button class="btn btn-ghost" @click="quitDialogRef?.close()">Cancel</button>
+        <button class="btn btn-ghost btn-error" @click="confirmQuit">Yes, quit</button>
       </div>
     </div>
     <form method="dialog" class="modal-backdrop">

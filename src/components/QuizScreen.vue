@@ -130,7 +130,7 @@ onUnmounted(clearTimer)
           v-for="option in shuffleOptions"
           :key="option"
           type="button"
-          class="btn btn-outline h-auto min-h-12 w-full justify-start whitespace-normal break-words py-3 text-left"
+          class="btn btn-soft h-auto min-h-12 w-full justify-start whitespace-normal break-words py-3 text-left"
           :class="{ 'btn-primary btn-active': option === selectedOption }"
           @click="selectedOption = option"
         >
@@ -139,10 +139,10 @@ onUnmounted(clearTimer)
       </div>
 
       <div class="card-actions flex flex-row justify-end mt-4 gap-2">
-        <button class="btn" @click="goBack" :disabled="!canGoBack">Back</button>
+        <button class="btn btn-soft" @click="goBack" :disabled="!canGoBack">Back</button>
         <button
           v-if="currentQuestion === props.questions.length - 1"
-          class="btn btn-primary"
+          class="btn btn-soft btn-primary"
           @click="askSubmit"
           :disabled="!timed && selectedOption === null"
         >
@@ -150,7 +150,7 @@ onUnmounted(clearTimer)
         </button>
         <button
           v-else
-          class="btn btn-primary"
+          class="btn btn-soft btn-primary"
           @click="submitAnswer"
           :disabled="!timed && selectedOption === null"
         >
@@ -164,8 +164,8 @@ onUnmounted(clearTimer)
         <h3 class="text-lg font-bold">Submit quiz?</h3>
         <p class="py-4">Are you sure to submit this quiz?</p>
         <div class="modal-action">
-          <button class="btn" @click="submitDialog?.close()">Cancel</button>
-          <button class="btn btn-primary" @click="confirmSubmit">Yes</button>
+          <button class="btn btn-soft" @click="submitDialog?.close()">Cancel</button>
+          <button class="btn btn-soft btn-primary" @click="confirmSubmit">Yes</button>
         </div>
       </div>
     </dialog>

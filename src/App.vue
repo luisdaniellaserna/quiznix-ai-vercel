@@ -681,7 +681,7 @@ function cancelEditSetup() {
         </p>
         <div class="modal-action">
           <button class="btn btn-soft" @click="cancelTakeover">Stay in other room</button>
-          <button class="btn btn-primary" @click="confirmTakeover">
+          <button class="btn btn-soft btn-primary" @click="confirmTakeover">
             Leave other &amp; continue
           </button>
         </div>
@@ -699,7 +699,7 @@ function cancelEditSetup() {
           {{ groupStore.evictedMessage || 'Another tab took over this session.' }}
         </p>
         <div class="modal-action">
-          <button class="btn btn-primary" @click="dismissEvicted">Back to home</button>
+          <button class="btn btn-soft btn-primary" @click="dismissEvicted">Back to home</button>
         </div>
       </div>
       <form method="dialog" class="modal-backdrop">
