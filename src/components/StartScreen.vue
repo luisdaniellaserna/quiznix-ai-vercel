@@ -172,15 +172,6 @@ if (props.fromGroupReplay) {
   }
 }
 
-const quotaPreview = computed(() => {
-  const n = allTopics.value.length
-  const total = Math.max(0, Math.floor(itemCount.value || 0))
-  if (gameMode.value !== 'group' || n === 0 || total <= 0) return ''
-  const base = Math.floor(total / n)
-  const rem = total % n
-  return allTopics.value.map((t, i) => `${t} x${base + (i < rem ? 1 : 0)}`).join(', ')
-})
-
 const canStart = computed(() => {
   if (allTopics.value.length === 0 || !Number.isFinite(itemCount.value) || itemCount.value < 1) {
     return false
@@ -482,7 +473,7 @@ function start() {
 
           <div class="border-t border-base-300 px-6 py-4 text-center">
             <button
-              class="text-sm font-semibold text-base-content/60 underline-offset-4 hover:underline"
+              class="btn btn-soft btn-sm"
               @click="backToLanding"
             >
               ← Back
@@ -525,7 +516,7 @@ function start() {
               >
               <div class="flex gap-2">
                 <button class="btn btn-primary btn-sm" @click="resumeHostSession">Reconnect</button>
-                <button class="btn btn-soft btn-sm" @click="dismissHostResume">Dismiss</button>
+                <button class="btn btn-warning btn-sm" @click="dismissHostResume">Dismiss</button>
               </div>
             </div>
             <p v-if="resumeError" role="alert" class="mt-2 text-sm text-error">{{ resumeError }}</p>
@@ -556,7 +547,7 @@ function start() {
 
           <div class="border-t border-base-300 px-6 py-4 text-center">
             <button
-              class="text-sm font-semibold text-base-content/60 underline-offset-4 hover:underline"
+              class="btn btn-soft btn-sm"
               @click="backToMode"
             >
               ← Back
@@ -618,7 +609,7 @@ function start() {
             </label>
             <button
               type="submit"
-              class="btn btn-primary mt-2 h-14 rounded-full text-lg font-semibold"
+              class="btn btn-soft btn-primary mt-2 h-14 rounded-full text-lg font-semibold"
               :disabled="!canJoinGroup"
             >
               Join room
@@ -627,7 +618,7 @@ function start() {
 
           <div class="border-t border-base-300 px-6 py-4 text-center">
             <button
-              class="text-sm font-semibold text-base-content/60 underline-offset-4 hover:underline"
+              class="btn btn-soft btn-sm"
               @click="backToGroupChoice"
             >
               ← Back to group options
@@ -699,7 +690,7 @@ function start() {
                 />
                 <button
                   type="button"
-                  class="btn btn-primary rounded-xl w-full sm:w-auto shrink-0"
+                  class="btn btn-soft btn-primary rounded-xl w-full sm:w-auto shrink-0"
                   :disabled="topic.trim() === ''"
                   @click="addTopic"
                 >
@@ -715,7 +706,7 @@ function start() {
                   {{ item }}
                   <button
                     type="button"
-                    class="btn btn-xs btn-circle btn-soft min-h-7 min-w-7"
+                    class="cursor-pointer text-base font-bold leading-none opacity-60 transition hover:text-error"
                     :aria-label="`Remove ${item}`"
                     @click="removeTopic(index)"
                   >
@@ -793,9 +784,6 @@ function start() {
                 class="toggle toggle-success"
               />
             </div>
-            <p v-if="gameMode === 'group' && quotaPreview" class="text-sm opacity-70">
-              Split: {{ quotaPreview }} ({{ Math.floor(itemCount || 0) }} total)
-            </p>
             <p
               v-if="
                 gameMode === 'group' &&
@@ -806,34 +794,36 @@ function start() {
             >
               Need at least {{ allTopics.length }} questions for {{ allTopics.length }} topics.
             </p>
-            <button
-              type="submit"
-              class="btn btn-primary mt-2 h-14 rounded-full text-lg font-semibold"
-              :disabled="!canStart"
-            >
-              🚀 {{ fromGroupReplay ? 'Finalize questions' : `Start ${gameMode} quiz` }}
-            </button>
-            <button
-              v-if="fromGroupReplay"
-              type="button"
-              class="btn btn-soft"
-              @click="emit('cancel-edit')"
-            >
-              Back to lobby without changes
-            </button>
+            <div class="mt-2 flex flex-col gap-2 sm:flex-row">
+              <button
+                type="submit"
+                class="btn btn-soft btn-primary flex-1 text-center whitespace-normal"
+                :disabled="!canStart"
+              >
+                {{ fromGroupReplay ? 'Finalize questions' : `Start ${gameMode} quiz` }}
+              </button>
+              <button
+                v-if="fromGroupReplay"
+                type="button"
+                class="btn btn-soft btn-warning flex-1 text-center whitespace-normal"
+                @click="emit('cancel-edit')"
+              >
+                Discard Changes
+              </button>
+            </div>
           </form>
 
           <div class="border-t border-base-300 px-6 py-4 text-center">
             <button
               v-if="!fromGroupReplay"
-              class="text-sm font-semibold text-base-content/60 underline-offset-4 hover:underline"
+              class="btn btn-soft btn-sm"
               @click="backToMode"
             >
               ← Change game mode
             </button>
             <button
               v-else
-              class="text-sm font-semibold text-base-content/60 underline-offset-4 hover:underline"
+              class="btn btn-soft btn-sm"
               @click="emit('cancel-edit')"
             >
               ← Back to lobby
