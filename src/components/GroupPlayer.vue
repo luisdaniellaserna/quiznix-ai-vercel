@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { roomServerOrigin, useGroupStore } from '../stores/groupStore'
 import { useCountdown } from '../composables/useCountdown'
@@ -119,15 +119,20 @@ watch(
 )
 
 watch(
-  () => store.error,
-  (message) => {
+  () => store.errorCode,
+  (code) => {
     joining.value = false
-    // a dead seat (room restarted, window expired, seat taken) invalidates the offer
-    if (
-      message &&
-      resumeOffer.value &&
-      /not found|expired|verify|no pending slot|full/i.test(message)
-    ) {
+    // a dead seat (room gone, window expired, seat unverifiable, room full)
+    // invalidates the resume offer — codes over prose so server rewording
+    // can't silently break the check
+    const DEAD_SEAT_CODES = new Set([
+      'ROOM_NOT_FOUND',
+      'REJOIN_WINDOW_EXPIRED',
+      'SESSION_VERIFY_FAILED',
+      'NO_PENDING_SLOT',
+      'ROOM_FULL',
+    ])
+    if (code && resumeOffer.value && DEAD_SEAT_CODES.has(code)) {
       store.discardResume(resumeOffer.value.code)
       resumeOffer.value = null
     }
@@ -159,6 +164,51 @@ const hasSubmitted = computed(() => store.myAnswer !== null)
 // Correct answer only shows when the whole cohort has answered, the timer ran out,
 // or the host force-skipped (server emits all-answered with the correct answer first).
 const isRevealed = computed(() => store.allAnswered || countdown.expired.value)
+
+// keep the player screen awake mid-game like the host — a locked phone kills the WS
+interface ScreenWakeLock {
+  release: () => Promise<void>
+}
+let wakeLock: ScreenWakeLock | null = null
+async function requestWakeLock() {
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLock = await (
+        navigator as unknown as {
+          wakeLock: { request: (t: string) => Promise<ScreenWakeLock> }
+        }
+      ).wakeLock.request('screen')
+    }
+  } catch {}
+}
+function releaseWakeLock() {
+  try {
+    wakeLock?.release()
+  } catch {}
+  wakeLock = null
+}
+watch(
+  () => store.phase,
+  (phase) => {
+    if (phase === 'lobby' || phase === 'question') {
+      void requestWakeLock()
+    } else {
+      releaseWakeLock()
+    }
+  },
+  { immediate: true },
+)
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (
+      document.visibilityState === 'visible' &&
+      (store.phase === 'lobby' || store.phase === 'question')
+    ) {
+      void requestWakeLock()
+    }
+  })
+}
+onUnmounted(() => releaseWakeLock())
 
 // Sidebar stats — derive from store so they refresh automatically as messages arrive.
 const totalRoster = computed(() => store.players.length)

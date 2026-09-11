@@ -13,8 +13,17 @@ import {
   evictOtherTab,
   getBlockingSession,
   onEvicted,
+  randomId,
   releaseActiveSession,
 } from './groupTabSync'
+import type { SocketState } from './reconnectPolicy'
+import {
+  decideSend,
+  isRecoverablePhase,
+  openBurst,
+  rejoinMessageFor,
+  shouldAutoResume,
+} from './reconnectPolicy'
 
 export type GroupRole = 'none' | 'host' | 'player'
 export type GroupPhase =
@@ -108,12 +117,16 @@ export const useGroupStore = defineStore('group', () => {
   const chatMessages = ref<ChatMessage[]>([])
   const closedMessage = ref('')
   const error = ref('')
+  /** Machine-readable code from the server's last error ('' when uncoded). */
+  const errorCode = ref('')
   const evictedMessage = ref('')
 
   const STORAGE_KEY = 'quiznix-group'
   const RESUME_TTL_FALLBACK_MS = 5 * 60 * 1000
   const MAX_CHAT_MESSAGES = 100
   const MAX_CHAT_LENGTH = 200
+  // bound the offline intent queue: a chatty tab must not grow it forever
+  const MAX_PENDING = 50
   const KEEPALIVE_MS = 20_000
   const MAX_RECONNECT_ATTEMPTS = 5
 
@@ -302,6 +315,9 @@ export const useGroupStore = defineStore('group', () => {
     role: GroupRole
     secret?: string
     ttlMs?: number
+    topic?: string
+    hostQuestions?: QuestionFormat[]
+    maxPlayers?: number
   } | null {
     try {
       const raw = sessionStorage.getItem(STORAGE_KEY)
@@ -314,24 +330,36 @@ export const useGroupStore = defineStore('group', () => {
   const UNREACHABLE_MESSAGE = `Cannot reach the room server at ${roomServerUrl()}. Start it with \`npm run dev:all\` (or \`npm run server\`), then try again.`
 
   function activePhase() {
-    return (
-      phase.value === 'connecting' ||
-      phase.value === 'lobby' ||
-      phase.value === 'starting' ||
-      phase.value === 'question'
-    )
+    return isRecoverablePhase(phase.value)
+  }
+
+  function socketState(): SocketState {
+    if (!socket) return 'down'
+    if (socket.readyState === WebSocket.OPEN) return 'open'
+    if (socket.readyState === WebSocket.CONNECTING) return 'connecting'
+    return 'down'
   }
 
   function send(message: GroupClientMessage) {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify(message))
+    const decision = decideSend(
+      socketState(),
+      shouldReconnect,
+      phase.value,
+      reconnectAttempts,
+      MAX_RECONNECT_ATTEMPTS,
+    )
+    if (decision === 'send') {
+      socket?.send(JSON.stringify(message))
       return
     }
     // Never kill the session on a transient blip caused by a user tap: queue
     // lobby intent and flush it after the rejoin handshake completes.
-    if (shouldReconnect && activePhase() && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+    if (decision === 'queue-redial' || decision === 'queue') {
+      if (pending.length >= MAX_PENDING) {
+        pending.shift()
+      }
       pending.push(message)
-      if (!socket || socket.readyState === WebSocket.CLOSED) {
+      if (decision === 'queue-redial' && (!socket || socket.readyState === WebSocket.CLOSED)) {
         scheduleReconnect()
       }
       return
@@ -365,21 +393,7 @@ export const useGroupStore = defineStore('group', () => {
   }
 
   function rejoinMessage(): GroupClientMessage | null {
-    const sess = loadSession()
-    if (!sess || !sess.code || !shouldReconnect) return null
-    if (sess.role === 'player' && sess.playerId) {
-      return {
-        type: 'rejoin',
-        code: sess.code,
-        playerId: sess.playerId,
-        name: sess.playerName || playerName.value,
-        secret: sess.secret,
-      }
-    }
-    if (sess.role === 'host') {
-      return { type: 'rejoinHost', code: sess.code, secret: sess.secret }
-    }
-    return null
+    return rejoinMessageFor(loadSession(), shouldReconnect, playerName.value)
   }
 
   function connect() {
@@ -401,18 +415,18 @@ export const useGroupStore = defineStore('group', () => {
       // Rejoin FIRST so the server knows this socket; only then flush actions
       // the user queued while offline (otherwise they fail as a stranger).
       const rejoin = activePhase() ? rejoinMessage() : null
-      if (rejoin) {
-        socket?.send(JSON.stringify(rejoin))
-      }
-      const queued = pending.splice(0)
-      for (const message of queued) {
-        // join/create carry their own handshake — never replay a stale one
-        // after a rejoin already re-attached this socket.
-        if (rejoin && (message.type === 'join' || message.type === 'create-room')) continue
+      for (const message of openBurst(rejoin, pending.splice(0))) {
         socket?.send(JSON.stringify(message))
       }
     }
-    socket.onmessage = (event) => handle(JSON.parse(event.data) as GroupServerMessage)
+    socket.onmessage = (event) => {
+      // a malformed frame must never take the tab down with it
+      try {
+        handle(JSON.parse(event.data) as GroupServerMessage)
+      } catch (err) {
+        console.error('[group] dropping malformed message', err)
+      }
+    }
     socket.onerror = () => {
       // triggers onclose — let the close handler decide to reconnect
       socket?.close()
@@ -523,7 +537,7 @@ export const useGroupStore = defineStore('group', () => {
           options.value = q.options
           timerSeconds.value = q.timerSeconds
           deadline.value = q.deadline
-          correctAnswer.value = q.correctAnswer
+          correctAnswer.value = q.correctAnswer ?? ''
           myAnswer.value = q.myAnswer
           allAnswered.value = false
           liveAnswers.value = {}
@@ -609,7 +623,7 @@ export const useGroupStore = defineStore('group', () => {
         options.value = message.options
         timerSeconds.value = message.timerSeconds
         deadline.value = message.deadline
-        correctAnswer.value = message.correctAnswer
+        correctAnswer.value = message.correctAnswer ?? ''
         myAnswer.value = null
         allAnswered.value = false
         error.value = ''
@@ -698,15 +712,20 @@ export const useGroupStore = defineStore('group', () => {
         // A stale host socket re-registering while the live host binding holds
         // the room is told "Host already connected." — expected after a rebind
         // elsewhere, with nothing to act on. Never surface it in host view.
-        if (role.value === 'host' && /host already connected/i.test(text)) {
+        if (role.value === 'host' && message.code === 'HOST_ALREADY_CONNECTED') {
           error.value = ''
+          errorCode.value = ''
           if (phase.value === 'connecting') {
             phase.value = 'idle'
           }
           break
         }
         error.value = text
-        const gone = /not found/i.test(text) && roomCode.value !== ''
+        errorCode.value = message.code ?? ''
+        // Room-not-found alone means the room died server-side; the same prose
+        // also appears in seat-scoped errors ("Player not found.") which must
+        // not tear down the session.
+        const gone = message.code === 'ROOM_NOT_FOUND' && roomCode.value !== ''
         // failed join/create should return to the form instead of staying stuck on loading
         if (phase.value === 'connecting') {
           phase.value = 'idle'
@@ -766,6 +785,7 @@ export const useGroupStore = defineStore('group', () => {
     chatMessages.value = []
     closedMessage.value = ''
     error.value = ''
+    errorCode.value = ''
     evictedMessage.value = ''
     // do not clear shouldReconnect here — leave() / close() handle it; createRoom/joinRoom reset it
   }
@@ -891,7 +911,7 @@ export const useGroupStore = defineStore('group', () => {
   function sendChat(text: string) {
     const trimmed = text.trim().slice(0, MAX_CHAT_LENGTH)
     if (!trimmed) return
-    send({ type: 'chat', id: crypto.randomUUID(), text: trimmed })
+    send({ type: 'chat', id: randomId(), text: trimmed })
   }
 
   function nextQuestion() {
@@ -1000,6 +1020,10 @@ export const useGroupStore = defineStore('group', () => {
   /** One-tap resume from the local mirror (crashed/new tab, seat still warm). */
   function resumePlayer(code: string, name: string) {
     reset()
+    // the mirror is the resume source of truth: a surviving sessionStorage
+    // session would race it with a second rejoin carrying the same pre-rotation
+    // secret — first rotates, second fails verification spuriously
+    clearSession()
     shouldReconnect = true
     reconnectAttempts = 0
     connection.value = 'reconnecting'
@@ -1027,6 +1051,7 @@ export const useGroupStore = defineStore('group', () => {
   /** Host one-tap resume from the local mirror. Caller flips to the group view. */
   function resumeHost(code: string) {
     reset()
+    clearSession()
     shouldReconnect = true
     reconnectAttempts = 0
     connection.value = 'reconnecting'
@@ -1042,6 +1067,45 @@ export const useGroupStore = defineStore('group', () => {
     connect()
     const mirror = loadMirrorSecret(normalizedCode)
     pending.push({ type: 'rejoinHost', code: normalizedCode, secret: mirror?.secret })
+  }
+
+  /**
+   * Resume a live room after a page refresh without making the user retype
+   * the code and name. Redials the stored session when no live tab already
+   * holds the room; returns true when a redial started. A dead room surfaces
+   * through the error handler (players get a clean exit, hosts keep their
+   * setup). Never resumes after an explicit leave — leave() clears the session.
+   */
+  function autoResume(expectedCode?: string): boolean {
+    if (phase.value !== 'idle') return false
+    const sess = loadSession()
+    if (!sess || !shouldAutoResume(sess, expectedCode, getBlockingSession()?.code ?? null)) {
+      return false
+    }
+    if (sess.role !== 'host' && sess.role !== 'player') return false
+    reset()
+    shouldReconnect = true
+    reconnectAttempts = 0
+    connection.value = 'reconnecting'
+    role.value = sess.role
+    phase.value = 'connecting'
+    error.value = ''
+    roomCode.value = sess.code
+    playerId.value = sess.playerId
+    playerName.value = sess.playerName ?? ''
+    if (sess.role === 'host') {
+      // the question payload never rides state-sync; restore the host's own copy
+      topic.value = sess.topic ?? ''
+      hostQuestions.value = sess.hostQuestions ?? []
+      if (sess.maxPlayers) maxPlayers.value = sess.maxPlayers
+    }
+    claimActiveSession({
+      code: sess.code,
+      role: sess.role,
+      playerName: sess.role === 'player' ? sess.playerName : undefined,
+    })
+    connect()
+    return true
   }
 
   function loadMirrorSecret(code: string): { playerId: string | null; secret: string } | null {
@@ -1139,6 +1203,7 @@ export const useGroupStore = defineStore('group', () => {
     leaderboard,
     closedMessage,
     error,
+    errorCode,
     evictedMessage,
     getBlockingSession,
     forceTakeover,
@@ -1147,6 +1212,7 @@ export const useGroupStore = defineStore('group', () => {
     joinRoom,
     resumePlayer,
     resumeHost,
+    autoResume,
     getResumeOffer,
     discardResume,
     retryNow,

@@ -1,4 +1,4 @@
-import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
+import { createHash, randomInt, randomUUID, timingSafeEqual } from 'node:crypto'
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 const CODE_LENGTH = 6
@@ -16,6 +16,30 @@ const HOST_GRACE_MS = 3 * 60 * 1000
 const FORCE_REVEAL_MS = 3000
 const MAX_CHAT_LENGTH = 200
 const COUNTDOWN_MS = 5000
+// Host-supplied content caps — every field here is re-broadcast to all clients
+const MAX_TOPIC_LENGTH = 120
+const MAX_QUESTIONS = 100
+const MAX_QUESTION_LENGTH = 500
+const MAX_ANSWER_LENGTH = 100
+const MAX_INCORRECT_ANSWERS = 8
+const MAX_TIMER_SECONDS = 300
+const MAX_ROOMS = 100
+// Token bucket per client for chatty messages (chat, answer) — capacity is the
+// burst size, the refill interval the sustained rate.
+const RATE_CAPACITY = 8
+const RATE_REFILL_MS = 500
+const MAX_CHAT_ID_LENGTH = 64
+
+/**
+ * Error carrying a machine-readable code so clients can branch without
+ * matching on prose. Messages remain stable and human-facing.
+ */
+export class RoomError extends Error {
+  constructor(code, message) {
+    super(message)
+    this.code = code
+  }
+}
 
 const HOST_STATUSES = new Set([
   'choosing-topic',
@@ -47,7 +71,11 @@ function secretMatches(storedHash, presented) {
 
 /** Timer/cap validation shared by create + update (message text kept stable). */
 function assertValidSettings({ timerSeconds, maxPlayers }) {
-  if (!Number.isFinite(timerSeconds) || timerSeconds <= 0) {
+  if (
+    !Number.isFinite(timerSeconds) ||
+    timerSeconds <= 0 ||
+    timerSeconds > MAX_TIMER_SECONDS
+  ) {
     throw new Error('Invalid timer setting.')
   }
   if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 100) {
@@ -56,46 +84,28 @@ function assertValidSettings({ timerSeconds, maxPlayers }) {
 }
 
 /** Non-empty question list validation (allows empty only at create-time for instant rooms). */
-function assertValidQuestions(questions) {
-  const valid =
-    Array.isArray(questions) &&
-    questions.length > 0 &&
-    questions.every(
-      (q) =>
-        typeof q.question === 'string' &&
-        q.question !== '' &&
-        typeof q.correct_answer === 'string' &&
-        q.correct_answer !== '' &&
-        Array.isArray(q.incorrect_answers) &&
-        q.incorrect_answers.length >= 1,
+function validQuestion(q) {
+  return (
+    typeof q.question === 'string' &&
+    q.question !== '' &&
+    q.question.length <= MAX_QUESTION_LENGTH &&
+    typeof q.correct_answer === 'string' &&
+    q.correct_answer !== '' &&
+    q.correct_answer.length <= MAX_ANSWER_LENGTH &&
+    Array.isArray(q.incorrect_answers) &&
+    q.incorrect_answers.length >= 1 &&
+    q.incorrect_answers.length <= MAX_INCORRECT_ANSWERS &&
+    q.incorrect_answers.every(
+      (a) => typeof a === 'string' && a !== '' && a.length <= MAX_ANSWER_LENGTH,
     )
-  if (!valid) {
-    throw new Error('Invalid question set.')
-  }
+  )
 }
 
-/** Shared validation for host-supplied quiz content (error messages kept stable). */
-function assertValidQuiz({ questions, timerSeconds, maxPlayers }) {
-  const valid =
-    Array.isArray(questions) &&
-    questions.length > 0 &&
-    questions.every(
-      (q) =>
-        typeof q.question === 'string' &&
-        q.question !== '' &&
-        typeof q.correct_answer === 'string' &&
-        q.correct_answer !== '' &&
-        Array.isArray(q.incorrect_answers) &&
-        q.incorrect_answers.length >= 1,
-    )
+/** Non-empty question list validation (allows empty only at create-time for instant rooms). */
+function assertValidQuestions(questions) {
+  const valid = Array.isArray(questions) && questions.length > 0 && questions.length <= MAX_QUESTIONS && questions.every(validQuestion)
   if (!valid) {
     throw new Error('Invalid question set.')
-  }
-  if (!Number.isFinite(timerSeconds) || timerSeconds <= 0) {
-    throw new Error('Invalid timer setting.')
-  }
-  if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 100) {
-    throw new Error('Max participants must be between 2 and 100.')
   }
 }
 
@@ -142,10 +152,31 @@ export class RoomManager {
     this.hostRooms = new Map()
     this.playerRooms = new Map()
     this.playerSeq = 0
+    this.messageBudgets = new Map()
   }
 
   emit(code, to, message, clientId) {
     this.onSend({ to, message, code, clientId })
+  }
+
+  /** Token bucket shared by chatty client messages; throws when drained. */
+  consumeRate(clientId) {
+    const nowMs = this.now()
+    const bucket = this.messageBudgets.get(clientId) ?? {
+      tokens: RATE_CAPACITY,
+      updatedAt: nowMs,
+    }
+    bucket.tokens = Math.min(
+      RATE_CAPACITY,
+      bucket.tokens + (nowMs - bucket.updatedAt) / RATE_REFILL_MS,
+    )
+    bucket.updatedAt = nowMs
+    if (bucket.tokens < 1) {
+      this.messageBudgets.set(clientId, bucket)
+      throw new RoomError('RATE_LIMITED', 'You are doing that too often. Slow down a little.')
+    }
+    bucket.tokens -= 1
+    this.messageBudgets.set(clientId, bucket)
   }
 
   createRoom(clientId, { topic, timerSeconds, questions, maxPlayers }) {
@@ -153,6 +184,26 @@ export class RoomManager {
     assertValidSettings({ timerSeconds, maxPlayers })
     if (list.length > 0) {
       assertValidQuestions(list)
+    }
+    // One live room per host socket: a replayed create-room closes the prior
+    // room instead of orphaning it with a host binding that blocks the sweep.
+    // Players are told directly; the same socket is busy creating, so it is
+    // deliberately not included.
+    // The socket becomes host-only: release any player seat it still holds,
+    // otherwise the seat would linger "connected" after the role switch.
+    this.playerDisconnected(clientId)
+    const priorCode = this.hostRooms.get(clientId)
+    if (priorCode) {
+      const prior = this.rooms.get(priorCode)
+      if (prior) {
+        this.emit(prior.code, 'players', { type: 'game-closed' })
+        this.deleteRoom(prior)
+      } else {
+        this.hostRooms.delete(clientId)
+      }
+    }
+    if (this.rooms.size >= MAX_ROOMS) {
+      throw new Error('Too many active rooms. Please try again later.')
     }
 
     const code = this.nextCode()
@@ -163,7 +214,7 @@ export class RoomManager {
       hostClientId: clientId,
       hostSecretHash: hashSecret(hostSecret),
       hostDisconnectedAt: null,
-      topic: String(topic ?? ''),
+      topic: String(topic ?? '').slice(0, MAX_TOPIC_LENGTH),
       timerSeconds,
       maxPlayers,
       questions: list,
@@ -185,17 +236,27 @@ export class RoomManager {
   joinRoom(clientId, code, name) {
     const room = this.rooms.get(String(code).trim().toUpperCase())
     if (!room) {
-      throw new Error('Room not found. Check the code and try again.')
+      throw new RoomError('ROOM_NOT_FOUND', 'Room not found. Check the code and try again.')
     }
     if (room.phase === 'starting') {
-      throw new Error('The game is starting. Please wait for the next round.')
+      throw new RoomError('GAME_STARTING', 'The game is starting. Please wait for the next round.')
     }
     if (room.phase !== 'lobby') {
-      throw new Error('The game has already started.')
+      throw new RoomError('GAME_STARTED', 'The game has already started.')
     }
     const trimmed = String(name ?? '').trim()
     if (trimmed === '' || trimmed.length > MAX_NAME_LENGTH) {
-      throw new Error(`A player name is required (1-${MAX_NAME_LENGTH} characters).`)
+      throw new RoomError(
+        'NAME_INVALID',
+        `A player name is required (1-${MAX_NAME_LENGTH} characters).`,
+      )
+    }
+    // A socket holds at most one seat: switching rooms releases the old one so
+    // it cannot linger "connected" (its eventual close would misattribute the
+    // drop to the new seat). Same-room rebinds keep their own paths below.
+    const priorEntry = this.playerRooms.get(clientId)
+    if (priorEntry && priorEntry.code !== room.code) {
+      this.playerDisconnected(clientId)
     }
     // same-name reclaim within grace (covers screen-off without playerId).
     // Lobby/starting only (joinRoom already rejects other phases) so a stranger
@@ -235,7 +296,7 @@ export class RoomManager {
       }
     }
     if (room.players.size >= room.maxPlayers) {
-      throw new Error('This room is full.')
+      throw new RoomError('ROOM_FULL', 'This room is full.')
     }
 
     const playerId = `p-${++this.playerSeq}`
@@ -288,9 +349,13 @@ export class RoomManager {
         options: this.optionsOf(room, room.index),
         timerSeconds: room.timerSeconds,
         deadline: room.deadline,
-        correctAnswer: q.correct_answer,
         scoreboard: buildScoreboard(room),
         myAnswer: player?.answers.get(room.index)?.option ?? null,
+      }
+      // Host-only payload: a player holding the answer mid-question could read
+      // it from devtools, so player syncs get it only at reveal (all-answered).
+      if (playerId == null) {
+        question.correctAnswer = q.correct_answer
       }
     }
     return {
@@ -441,6 +506,7 @@ export class RoomManager {
     if (this.now() > room.deadline + ANSWER_GRACE_MS) {
       throw new Error('Time is up!')
     }
+    this.consumeRate(clientId)
 
     player.answers.set(room.index, {
       option,
@@ -564,9 +630,10 @@ export class RoomManager {
     if (trimmed.length > MAX_CHAT_LENGTH) {
       throw new Error(`Chat messages are limited to ${MAX_CHAT_LENGTH} characters.`)
     }
+    this.consumeRate(clientId)
     this.emit(room.code, 'all', {
       type: 'chat-received',
-      id: String(id ?? ''),
+      id: String(id ?? '').slice(0, MAX_CHAT_ID_LENGTH),
       senderId: sender.senderId,
       name: sender.name,
       role: sender.role,
@@ -589,7 +656,7 @@ export class RoomManager {
     if (maxPlayers < room.players.size) {
       throw new Error('New limit is below the current player count.')
     }
-    room.topic = String(topic ?? '')
+    room.topic = String(topic ?? '').slice(0, MAX_TOPIC_LENGTH)
     room.timerSeconds = timerSeconds
     room.maxPlayers = maxPlayers
     room.questions = questions
@@ -665,17 +732,23 @@ export class RoomManager {
     const roomCode = String(code).trim().toUpperCase()
     const room = this.rooms.get(roomCode)
     if (!room) {
-      throw new Error('Room not found. Check the code and try again.')
+      throw new RoomError('ROOM_NOT_FOUND', 'Room not found. Check the code and try again.')
     }
     if (!secretMatches(room.hostSecretHash, secret)) {
       if (room.hostClientId) {
-        throw new Error('Host already connected.')
+        throw new RoomError('HOST_ALREADY_CONNECTED', 'Host already connected.')
       }
-      throw new Error("Couldn't verify the host session. Please create a new room.")
+      throw new RoomError(
+        'SESSION_VERIFY_FAILED',
+        "Couldn't verify the host session. Please create a new room.",
+      )
     }
     if (room.hostDisconnectedAt != null && this.now() - room.hostDisconnectedAt > HOST_GRACE_MS) {
       this.deleteRoom(room)
-      throw new Error('Host rejoin window expired (3 minutes). Room closed.')
+      throw new RoomError(
+        'REJOIN_WINDOW_EXPIRED',
+        'Host rejoin window expired (3 minutes). Room closed.',
+      )
     }
     const displaced = []
     if (room.hostClientId && room.hostClientId !== clientId) {
@@ -796,19 +869,32 @@ export class RoomManager {
     const roomCode = String(code).trim().toUpperCase()
     const room = this.rooms.get(roomCode)
     if (!room) {
-      throw new Error('Room not found. Check the code and try again.')
+      throw new RoomError('ROOM_NOT_FOUND', 'Room not found. Check the code and try again.')
     }
     const trimmedName = String(name ?? '').trim()
+    // an oversized name would be stored and broadcast in every roster
+    if (trimmedName.length > MAX_NAME_LENGTH) {
+      throw new RoomError(
+        'NAME_INVALID',
+        `A player name is required (1-${MAX_NAME_LENGTH} characters).`,
+      )
+    }
     const player = room.players.get(playerId)
     if (player && secretMatches(player.secretHash, secret)) {
       if (player.disconnectedAt != null && this.now() - player.disconnectedAt > PLAYER_GRACE_MS) {
         room.players.delete(playerId)
-        throw new Error('Rejoin window expired (5 minutes). Please join as a new player.')
+        throw new RoomError(
+          'REJOIN_WINDOW_EXPIRED',
+          'Rejoin window expired (5 minutes). Please join as a new player.',
+        )
       }
-      return this.attachSeat(room, playerId, player, clientId, trimmedName, secret)
+      return this.attachSeat(room, playerId, player, clientId, trimmedName)
     }
     if (player) {
-      throw new Error("Couldn't verify your previous session. Please join as a new player.")
+      throw new RoomError(
+        'SESSION_VERIFY_FAILED',
+        "Couldn't verify your previous session. Please join as a new player.",
+      )
     }
     // Fallback: same-name reclaim for token-less clients (new device, lost id).
     // Lobby/starting only — mid-game return requires the resume token so a
@@ -820,19 +906,21 @@ export class RoomManager {
             room.players.delete(pid)
             continue
           }
-          return this.attachSeat(room, pid, p, clientId, trimmedName, null)
+          return this.attachSeat(room, pid, p, clientId, trimmedName)
         }
       }
     }
-    throw new Error('No pending slot for rejoin. Please join as new player with a different code.')
+    throw new RoomError(
+      'NO_PENDING_SLOT',
+      'No pending slot for rejoin. Please join as new player with a different code.',
+    )
   }
 
   /**
    * Binds a socket to a seat: clears stale mappings, mints a fresh secret,
    * notifies the room, and delivers one atomic state-sync to the returner.
-   * `presentedSecret` null = trusted fallback path (same-name reclaim).
    */
-  attachSeat(room, playerId, player, clientId, trimmedName, presentedSecret) {
+  attachSeat(room, playerId, player, clientId, trimmedName) {
     const displaced = []
     // drop every stale socket mapping for this seat (ghost authority overlap:
     // a half-open old socket must never share the seat with the live one)
@@ -894,6 +982,12 @@ export class RoomManager {
         if (!removed.includes(room.code)) removed.push(room.code)
       }
     }
+    // drop rate buckets for clients that no longer hold a room role
+    for (const clientId of this.messageBudgets.keys()) {
+      if (!this.playerRooms.has(clientId) && !this.hostRooms.has(clientId)) {
+        this.messageBudgets.delete(clientId)
+      }
+    }
     return removed
   }
 
@@ -903,7 +997,7 @@ export class RoomManager {
     room.index = index
     room.countdownDeadline = 0
     room.deadline = this.now() + room.timerSeconds * 1000
-    this.emit(room.code, 'all', {
+    const payload = {
       type: 'question-started',
       index,
       total: room.questions.length,
@@ -911,9 +1005,15 @@ export class RoomManager {
       options: this.optionsOf(room, index),
       timerSeconds: room.timerSeconds,
       deadline: room.deadline,
-      correctAnswer: room.questions[index].correct_answer,
       scoreboard: buildScoreboard(room),
+    }
+    // The answer ships only to the host; players see it at reveal time
+    // (all-answered / force-skip), never while the question is open.
+    this.emit(room.code, 'host', {
+      ...payload,
+      correctAnswer: room.questions[index].correct_answer,
     })
+    this.emit(room.code, 'players', payload)
     this.broadcastHostStatus(room)
   }
 
@@ -1000,7 +1100,8 @@ export class RoomManager {
     do {
       code = Array.from(
         { length: CODE_LENGTH },
-        () => CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)],
+        // crypto-grade randomness: the code is the only gate for joining
+        () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)],
       ).join('')
     } while (this.rooms.has(code))
     return code
