@@ -3,9 +3,15 @@ import { networkInterfaces } from 'node:os'
 import http from 'node:http'
 import { WebSocketServer } from 'ws'
 import { RoomManager, RoomError } from './roomManager.mjs'
+import { isOriginAllowed, parseAllowedOrigins } from './origin.mjs'
 
 const PORT = Number(process.env.PORT) || 8787
 const SWEEP_INTERVAL_MS = 30 * 60 * 1000
+
+// Extra page origins allowed to open a WebSocket, on top of the same-host rule.
+// A split deploy (SPA on Vercel, room server on Render) is cross-origin, so its
+// page origin must be listed here, e.g. ALLOWED_ORIGINS=https://your-app.vercel.app
+const ALLOWED_ORIGINS = parseAllowedOrigins(process.env.ALLOWED_ORIGINS)
 
 function lanAddresses() {
   const addresses = []
@@ -319,23 +325,12 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 })
 
 // Cross-Site WebSocket Hijacking: browsers do not preflight ws upgrades, so
-// any page a user visits could dial this server. Require the Origin's hostname
-// to match the Host header's hostname. Port-insensitive on purpose: the vite
-// dev page (:5173) dials the room server (:8787) on the same address, while
-// pages from other hosts (the actual threat) fail the match. Non-browser
-// clients send no Origin and are allowed.
+// any page a user visits could dial this server. Allow only a same-host Origin
+// (local dev, same-domain deploy) or an explicitly allowlisted one
+// (ALLOWED_ORIGINS — a split deploy like Vercel + Render is cross-origin).
+// Non-browser clients send no Origin and are allowed.
 function originAllowed(req) {
-  const origin = req.headers.origin
-  if (!origin) {
-    return true
-  }
-  try {
-    const originHost = new URL(origin).hostname
-    const hostHostname = new URL(`http://${req.headers.host ?? ''}`).hostname
-    return originHost === hostHostname
-  } catch {
-    return false
-  }
+  return isOriginAllowed(req.headers.origin, req.headers.host, ALLOWED_ORIGINS)
 }
 
 server.on('upgrade', (req, socket, head) => {

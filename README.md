@@ -147,6 +147,16 @@ work out of the box.
   VITE_WS_URL=wss://your-ws-host.onrender.com
   ```
   Redeploy. If `VITE_WS_URL` is unset on `https://quiznix.vercel.app`, the app tries `wss://quiznix.vercel.app:8787` which has no server and group mode will show “Cannot reach the room server”.
+- The room server rejects a WebSocket upgrade unless the page's `Origin` matches
+  its own host or is listed in `ALLOWED_ORIGINS` (a CSWSH guard). A split deploy
+  is cross-origin, so list your SPA origin on the **WS host** (Render →
+  Environment):
+  ```
+  ALLOWED_ORIGINS=https://your-app.vercel.app
+  ```
+  Comma-separate multiple origins (full URLs or bare hostnames). Redeploy the WS
+  host after changing it. Without this the browser's upgrade is answered
+  `403 Forbidden` and group mode never connects.
 
 ## Scripts
 
