@@ -68,6 +68,8 @@ export const useGroupStore = defineStore('group', () => {
   let socket: WebSocket | null = null
   let pending: GroupClientMessage[] = []
   let reconnectAttempts = 0
+  // When the current outage began (0 = no outage). Bounds how long we retry.
+  let outageStartedAt = 0
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let shouldReconnect = true
 
@@ -128,7 +130,18 @@ export const useGroupStore = defineStore('group', () => {
   // bound the offline intent queue: a chatty tab must not grow it forever
   const MAX_PENDING = 50
   const KEEPALIVE_MS = 20_000
-  const MAX_RECONNECT_ATTEMPTS = 5
+  // Retry an active session for this long after it drops. A cold room-server
+  // host (Render free tier) can take a minute or more to answer the first
+  // WebSocket upgrade, so a small fixed attempt count would give up mid-boot
+  // and strand the room. The window keeps retrying instead.
+  const RECONNECT_WINDOW_MS = 90_000
+  // Cap the exponential backoff so a long outage keeps a steady retry cadence.
+  const MAX_BACKOFF_MS = 10_000
+
+  function clearReconnectState() {
+    reconnectAttempts = 0
+    outageStartedAt = 0
+  }
 
   function resumeStorageKey(code: string) {
     return `quiznix-resume-${code.trim().toUpperCase()}`
@@ -340,20 +353,27 @@ export const useGroupStore = defineStore('group', () => {
     return 'down'
   }
 
+  /** True while any current outage is still inside the retry window. Before an
+   * outage starts (outageStartedAt === 0) it counts as open so the first
+   * send can queue. */
+  function withinReconnectWindow() {
+    return outageStartedAt === 0 || Date.now() - outageStartedAt < RECONNECT_WINDOW_MS
+  }
+
   function send(message: GroupClientMessage) {
     const decision = decideSend(
       socketState(),
       shouldReconnect,
       phase.value,
-      reconnectAttempts,
-      MAX_RECONNECT_ATTEMPTS,
+      withinReconnectWindow(),
     )
     if (decision === 'send') {
       socket?.send(JSON.stringify(message))
       return
     }
     // Never kill the session on a transient blip caused by a user tap: queue
-    // lobby intent and flush it after the rejoin handshake completes.
+    // lobby intent and flush it after the rejoin handshake completes. The
+    // retry window (not an attempt count) decides when the server is gone.
     if (decision === 'queue-redial' || decision === 'queue') {
       if (pending.length >= MAX_PENDING) {
         pending.shift()
@@ -370,13 +390,14 @@ export const useGroupStore = defineStore('group', () => {
   function scheduleReconnect() {
     if (!shouldReconnect) return
     if (phase.value === 'finished' || phase.value === 'closed') return
-    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    if (outageStartedAt === 0) outageStartedAt = Date.now()
+    if (!withinReconnectWindow()) {
       connection.value = 'failed'
       return
     }
     connection.value = 'reconnecting'
     const base = 1000 * Math.pow(2, reconnectAttempts)
-    const delay = Math.min(base, 30000) + Math.random() * 500
+    const delay = Math.min(base, MAX_BACKOFF_MS) + Math.random() * 500
     console.log(
       `[group] disconnected — reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts + 1})`,
     )
@@ -385,15 +406,36 @@ export const useGroupStore = defineStore('group', () => {
     reconnectTimer = setTimeout(() => connect(), delay)
   }
 
-  /** Manual retry from the reconnect banner (resets the attempt budget). */
+  /** Manual retry from the reconnect banner (starts a fresh retry window). */
   function retryNow() {
-    reconnectAttempts = 0
+    clearReconnectState()
     connection.value = 'reconnecting'
     connect()
   }
 
   function rejoinMessage(): GroupClientMessage | null {
     return rejoinMessageFor(loadSession(), shouldReconnect, playerName.value)
+  }
+
+  // A sleeping host (Render free tier) has to boot before it can accept the
+  // WebSocket upgrade, and upgrade requests alone can be rejected outright.
+  // A best-effort HTTP GET to the health endpoint reliably starts that boot, so
+  // the retry window below has a warm server to reach. Errors are ignored.
+  let warmupInFlight = false
+  function warmRoomServer() {
+    if (warmupInFlight) return
+    warmupInFlight = true
+    const controller = new AbortController()
+    const abortTimer = setTimeout(() => controller.abort(), 8000)
+    void fetch(`${roomServerOrigin()}/healthz`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+      .catch(() => {})
+      .finally(() => {
+        clearTimeout(abortTimer)
+        warmupInFlight = false
+      })
   }
 
   function connect() {
@@ -407,19 +449,25 @@ export const useGroupStore = defineStore('group', () => {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
     }
-    socket = new WebSocket(roomServerUrl())
-    socket.onopen = () => {
+    warmRoomServer()
+    const ws = new WebSocket(roomServerUrl())
+    socket = ws
+    // Every handler closes over `ws` and bails if a newer attempt already
+    // replaced it, so a stale socket can never disturb the live connection.
+    ws.onopen = () => {
+      if (ws !== socket) return
       console.log('[group] connected')
-      reconnectAttempts = 0
+      clearReconnectState()
       connection.value = 'online'
       // Rejoin FIRST so the server knows this socket; only then flush actions
       // the user queued while offline (otherwise they fail as a stranger).
       const rejoin = activePhase() ? rejoinMessage() : null
       for (const message of openBurst(rejoin, pending.splice(0))) {
-        socket?.send(JSON.stringify(message))
+        ws.send(JSON.stringify(message))
       }
     }
-    socket.onmessage = (event) => {
+    ws.onmessage = (event) => {
+      if (ws !== socket) return
       // a malformed frame must never take the tab down with it
       try {
         handle(JSON.parse(event.data) as GroupServerMessage)
@@ -427,11 +475,12 @@ export const useGroupStore = defineStore('group', () => {
         console.error('[group] dropping malformed message', err)
       }
     }
-    socket.onerror = () => {
+    ws.onerror = () => {
       // triggers onclose — let the close handler decide to reconnect
-      socket?.close()
+      if (ws === socket) ws.close()
     }
-    socket.onclose = () => {
+    ws.onclose = () => {
+      if (ws !== socket) return
       stopKeepalive()
       // if we intentionally left (leave/closeRoom) or game finished, do not reconnect
       if (!shouldReconnect || phase.value === 'finished' || phase.value === 'closed') {
@@ -813,7 +862,7 @@ export const useGroupStore = defineStore('group', () => {
   }) {
     reset()
     shouldReconnect = true
-    reconnectAttempts = 0
+    clearReconnectState()
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
@@ -840,7 +889,7 @@ export const useGroupStore = defineStore('group', () => {
   function joinRoom(code: string, name: string) {
     reset()
     shouldReconnect = true
-    reconnectAttempts = 0
+    clearReconnectState()
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
@@ -1007,7 +1056,7 @@ export const useGroupStore = defineStore('group', () => {
       socket = null
     }
     pending = []
-    reconnectAttempts = 0
+    clearReconnectState()
     connection.value = 'online'
     clearResume()
     clearSession()
@@ -1025,7 +1074,7 @@ export const useGroupStore = defineStore('group', () => {
     // secret — first rotates, second fails verification spuriously
     clearSession()
     shouldReconnect = true
-    reconnectAttempts = 0
+    clearReconnectState()
     connection.value = 'reconnecting'
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
@@ -1053,7 +1102,7 @@ export const useGroupStore = defineStore('group', () => {
     reset()
     clearSession()
     shouldReconnect = true
-    reconnectAttempts = 0
+    clearReconnectState()
     connection.value = 'reconnecting'
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
@@ -1085,7 +1134,7 @@ export const useGroupStore = defineStore('group', () => {
     if (sess.role !== 'host' && sess.role !== 'player') return false
     reset()
     shouldReconnect = true
-    reconnectAttempts = 0
+    clearReconnectState()
     connection.value = 'reconnecting'
     role.value = sess.role
     phase.value = 'connecting'

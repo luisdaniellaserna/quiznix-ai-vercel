@@ -33,18 +33,18 @@ export function isRecoverablePhase(phase: ReconnectPhase): boolean {
 
 /**
  * Pure send policy: a message tapped while the socket is down mid-game must
- * wait for the redial, never kill the session. The attempt budget bounds the
- * queueing so a dead server eventually surfaces as unreachable.
+ * wait for the redial, never kill the session. `canQueue` bounds the queueing
+ * (the store passes its retry-window state) so a dead server eventually
+ * surfaces as unreachable.
  */
 export function decideSend(
   state: SocketState,
   shouldReconnect: boolean,
   phase: ReconnectPhase,
-  reconnectAttempts: number,
-  maxAttempts: number,
+  canQueue: boolean,
 ): SendDecision {
   if (state === 'open') return 'send'
-  if (shouldReconnect && isRecoverablePhase(phase) && reconnectAttempts < maxAttempts) {
+  if (shouldReconnect && isRecoverablePhase(phase) && canQueue) {
     return 'queue-redial'
   }
   if (state === 'connecting') return 'queue'
