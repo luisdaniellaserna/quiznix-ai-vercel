@@ -249,6 +249,9 @@ function handleMessage(ws, raw) {
       case 'back-to-lobby':
         manager.backToLobby(clientId)
         break
+      case 'clear-room-quiz':
+        manager.clearRoomQuiz(clientId)
+        break
       case 'update-room-quiz':
         manager.updateRoomQuiz(clientId, {
           topic: message.topic,

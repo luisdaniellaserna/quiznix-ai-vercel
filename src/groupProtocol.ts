@@ -149,6 +149,7 @@ export type GroupClientMessage =
   | { type: 'chat'; id: string; text: string }
   | { type: 'next-question' }
   | { type: 'back-to-lobby' }
+  | { type: 'clear-room-quiz' }
   | {
       type: 'update-room-quiz'
       topic: string

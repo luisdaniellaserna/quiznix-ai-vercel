@@ -14,6 +14,7 @@ import { computeScore } from './scoring'
 import { parseJsonResponse } from './jsonParse'
 import { useGroupStore } from './stores/groupStore'
 import { randomId } from './stores/groupTabSync'
+import { fillToCount, normalizeQuestion, sanitizeQuestions } from './quizGeneration'
 
 const apiKey = import.meta.env.VITE_DEEPSEEK_API_KEY
 
@@ -136,37 +137,23 @@ if (groupStore.autoResume(urlRoom)) {
 const score = computed(() => computeScore(userAnswers.value))
 
 function parseAndValidate(raw: string): Questions {
-  const parsed = parseJsonResponse(raw) as Questions
-  if (!Array.isArray(parsed.results) || parsed.results.length === 0) {
+  const parsed = parseJsonResponse(raw) as { response_code?: number; results?: unknown }
+  // Drop malformed entries up front — the group server rejects a whole set for
+  // one bad question, which would otherwise strand the room on a stale quiz.
+  const results = sanitizeQuestions(parsed.results)
+  if (results.length === 0) {
     throw new Error('No quiz questions were generated. Please try again.')
   }
-  // Explanation is optional (old cached questions lack it) — normalize when present.
-  for (const q of parsed.results) {
-    if (typeof q.explanation === 'string') {
-      const trimmed = q.explanation.trim()
-      q.explanation = trimmed === '' ? undefined : trimmed
-    } else {
-      q.explanation = undefined
-    }
-  }
-  return parsed
-}
-
-function dedupeByQuestion(existing: QuestionFormat[], candidate: QuestionFormat): boolean {
-  const text = normalizeQuestion(candidate.question)
-  if (!text) return false
-  return existing.some((q) => normalizeQuestion(q.question) === text)
-}
-
-function normalizeQuestion(text: string): string {
-  return text.trim().toLowerCase().replace(/\s+/g, ' ')
+  return { response_code: parsed.response_code ?? 0, results }
 }
 
 // Texts of recently asked questions, persisted across sessions so the next quiz
 // can explicitly exclude them. Only the prompt needs them — no other state.
 const QUESTION_HISTORY_KEY = 'quiznix-question-history'
 const QUESTION_HISTORY_LIMIT = 60
-const QUESTION_EXCLUDE_LIMIT = 30
+// Exclude the whole retained history from the prompt, not a subset — near-dupes
+// are filtered again client-side, but the model should not see the repeats at all.
+const QUESTION_EXCLUDE_LIMIT = QUESTION_HISTORY_LIMIT
 
 function loadQuestionHistory(): string[] {
   try {
@@ -199,38 +186,13 @@ function saveQuestionHistory(questions: string[]): void {
   }
 }
 
-// The model sometimes returns fewer questions than requested (often after a topic/difficulty
-// change). Retry once with a focused follow-up that asks only for the missing count, citing
-// the questions already generated so it doesn't repeat them. If still short, throw — better
-// to fail than to ship a quiz with 3 of 5 questions.
-async function ensureQuestionCount(
-  initial: Questions,
-  requested: number,
-  fetchMore: (missing: number) => Promise<QuestionFormat[]>,
-): Promise<Questions> {
-  const existing = [...initial.results]
-  if (existing.length >= requested) {
-    return { ...initial, results: existing.slice(0, requested) }
-  }
-  const missing = requested - existing.length
-  const extra = await fetchMore(missing)
-  const filtered = extra.filter((q) => !dedupeByQuestion(existing, q))
-  const merged = [...existing, ...filtered]
-  if (merged.length < requested) {
-    throw new Error(
-      `Only ${merged.length} of ${requested} questions were generated. Please try again.`,
-    )
-  }
-  return { ...initial, results: merged.slice(0, requested) }
-}
-
 async function deepseekMain(
   topics: string[],
   mode: Mode,
   count: number,
   recentQuestions: string[],
   variationSeed: string,
-  existing: QuestionFormat[] = [],
+  alreadyAsked: string[] = [],
 ): Promise<Questions> {
   const openai = new OpenAI({
     baseURL: 'https://api.deepseek.com',
@@ -265,9 +227,9 @@ async function deepseekMain(
 
   const basePrompt = buildQuizPrompt(topics, mode, count, { recentQuestions, variationSeed })
   const userPrompt =
-    existing.length > 0
-      ? `${basePrompt}\n\nThese ${existing.length} questions were already asked (in this quiz or recent ones) and must NOT be repeated:\n${existing
-          .map((q, i) => `${i + 1}. ${q.question}`)
+    alreadyAsked.length > 0
+      ? `${basePrompt}\n\nThese ${alreadyAsked.length} questions were already asked (in this quiz or recent ones) and must NOT be repeated:\n${alreadyAsked
+          .map((q, i) => `${i + 1}. ${q}`)
           .join(
             '\n',
           )}\n\nGenerate exactly ${count} new, distinct questions that fit the same topics and difficulty.`
@@ -321,29 +283,40 @@ async function deepseekFetchMore(
   missing: number,
   recentQuestions: string[],
   variationSeed: string,
-  existing: QuestionFormat[],
+  alreadyAsked: string[],
 ): Promise<QuestionFormat[]> {
-  const result = await deepseekMain(topics, mode, missing, recentQuestions, variationSeed, existing)
+  const result = await deepseekMain(
+    topics,
+    mode,
+    missing,
+    recentQuestions,
+    variationSeed,
+    alreadyAsked,
+  )
   return result.results
 }
 
 async function generateQuestions(topics: string[], mode: Mode, count: number): Promise<Questions> {
   const history = loadQuestionHistory()
   const recent = history.slice(-QUESTION_EXCLUDE_LIMIT)
-  const known = new Set(history.map(normalizeQuestion))
   const variationSeed = randomId().slice(0, 8)
   const initial = await deepseekMain(topics, mode, count, recent, variationSeed)
-  // Never re-ask a question from a previous quiz, even if the model ignored
-  // the exclusion list — treat repeats as missing and fetch replacements.
-  const fresh = initial.results.filter((q) => !known.has(normalizeQuestion(q.question)))
-  const base = { ...initial, results: fresh }
-  // `recent` is already in the base prompt's exclusion list — only the
-  // in-quiz questions need repeating here.
-  const fetchMore = (missing: number) =>
-    deepseekFetchMore(topics, mode, missing, recent, variationSeed, base.results)
-  const completed = await ensureQuestionCount(base, count, fetchMore)
-  saveQuestionHistory(completed.results.map((q) => q.question))
-  return completed
+  // Seed + top-ups all pass through fillToCount, which drops malformed entries
+  // and repeats (against the batch, the quiz, and previous quizzes).
+  const results = await fillToCount({
+    requested: count,
+    seed: initial.results,
+    history,
+    fetchMore: (missing, alreadyAsked) =>
+      deepseekFetchMore(topics, mode, missing, recent, variationSeed, alreadyAsked),
+  })
+  if (results.length < count) {
+    throw new Error(
+      `Only ${results.length} of ${count} questions were generated. Please try again.`,
+    )
+  }
+  saveQuestionHistory(results.map((q) => q.question))
+  return { response_code: 0, results }
 }
 
 /** Even split of total items across topics: first `remainder` topics get +1. */
@@ -368,12 +341,11 @@ async function generateGroupQuestions(
   const quotas = computeQuotas(total, clean.length)
   const history = loadQuestionHistory()
   const recent = history.slice(-QUESTION_EXCLUDE_LIMIT)
-  const known = new Set(history.map(normalizeQuestion))
   const seedBase = randomId().slice(0, 8)
   const perTopic = await Promise.all(
     clean.map((topic, i) =>
       deepseekMain([topic], mode, quotas[i], recent, `${seedBase}-${i}`).then(
-        (res) => ({ topic, quota: quotas[i], results: res.results }),
+        (res) => res.results,
         (err) => {
           throw new Error(
             `Could not generate questions for "${topic}": ${err instanceof Error ? err.message : String(err)}`,
@@ -382,24 +354,15 @@ async function generateGroupQuestions(
       ),
     ),
   )
-  const merged: QuestionFormat[] = []
-  for (const { results } of perTopic) {
-    for (const q of results) {
-      if (!known.has(normalizeQuestion(q.question)) && !dedupeByQuestion(merged, q)) {
-        merged.push(q)
-      }
-    }
-  }
-  // top-up any shortfall (model returned fewer or dupes filtered)
-  if (merged.length < total) {
-    const missing = total - merged.length
-    const extra = await deepseekFetchMore(clean, mode, missing, recent, seedBase, merged)
-    for (const q of extra) {
-      if (!dedupeByQuestion(merged, q) && !known.has(normalizeQuestion(q.question))) {
-        merged.push(q)
-      }
-    }
-  }
+  // Merge every topic's questions through the same sanitize + dedupe pass (so
+  // cross-topic repeats are caught) and top up any shortfall.
+  const merged = await fillToCount({
+    requested: total,
+    seed: perTopic.flat(),
+    history,
+    fetchMore: (missing, alreadyAsked) =>
+      deepseekFetchMore(clean, mode, missing, recent, seedBase, alreadyAsked),
+  })
   if (merged.length < total) {
     throw new Error(`Only ${merged.length} of ${total} questions were generated. Please try again.`)
   }
@@ -513,10 +476,11 @@ async function proceedWithGroupStart(payload: {
     errorMessage.value =
       err instanceof Error ? err.message : 'Something went wrong! Please try again.'
     isError.value = true
-    if (!isNewRoom) {
-      groupStore.setHostStatus('choosing-topic', topicLabel)
-    }
-    // new rooms stay in the lobby with quizReady=false; host can Edit setup + retry
+    // Never leave the previous quiz playable: clear the room's content so the
+    // host retries setup instead of replaying stale questions.
+    groupStore.clearRoomQuiz()
+    hostReplayMode.value = true
+    status.value = 'start'
   }
 }
 

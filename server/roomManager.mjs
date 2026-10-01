@@ -679,6 +679,33 @@ export class RoomManager {
     this.broadcastHostStatus(room)
   }
 
+  // Host failed to (re)generate questions: drop the room's quiz so the previous
+  // set can never be started. Room code, roster and players are untouched — the
+  // host retries generation from the setup screen.
+  clearRoomQuiz(clientId) {
+    const room = this.roomOfHost(clientId)
+    if (room.phase !== 'lobby') {
+      throw new Error('Questions can only be updated from the lobby.')
+    }
+    room.questions = []
+    room.quizReady = false
+    room.hostStatus = 'generating'
+    room.hostDetail = ''
+    room.index = -1
+    room.deadline = 0
+    room.pendingAdvance = null
+    for (const player of room.players.values()) {
+      player.ready = false
+    }
+    this.emit(room.code, 'all', {
+      type: 'room-to-lobby',
+      players: this.playersOf(room),
+      topic: room.topic,
+      quizReady: false,
+    })
+    this.broadcastHostStatus(room)
+  }
+
   scheduleAdvance(room, delayMs) {
     room.pendingAdvance = { scheduledAt: this.now(), delayMs }
   }

@@ -998,6 +998,15 @@ export const useGroupStore = defineStore('group', () => {
     })
   }
 
+  /** Host wipes the room's quiz after a failed regeneration so the previous
+   * questions can never be started. Room, roster and code stay intact. */
+  function clearRoomQuiz() {
+    hostQuestions.value = []
+    quizReady.value = false
+    if (!roomCode.value) return
+    send({ type: 'clear-room-quiz' })
+  }
+
   function closeRoom() {
     // Intentional destroy: send directly when possible. The generic send()
     // would queue behind a reconnect, and the leave() that follows a host
@@ -1276,6 +1285,7 @@ export const useGroupStore = defineStore('group', () => {
     backToLobby,
     returnToLobby,
     updateRoomQuiz,
+    clearRoomQuiz,
     closeRoom,
     leave,
   }
