@@ -12,6 +12,7 @@
     "dev:all": "run-p dev server",
     "predev:all": "node scripts/free-port.mjs 8787",
     "test:server": "node --test server/*.test.mjs",
+    "test": "vitest run",
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "build-only": "vite build",
@@ -50,6 +51,7 @@
     "typescript": "~5.8.0",
     "vite": "npm:rolldown-vite@latest",
     "vite-plugin-vue-devtools": "^8.0.0",
+    "vitest": "^5.0.2",
     "vue-tsc": "^3.3.11"
   }
 }

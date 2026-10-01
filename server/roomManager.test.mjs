@@ -1083,6 +1083,46 @@ test('updateRoomQuiz rejects outside the lobby and invalid content', () => {
   )
 })
 
+test('clearRoomQuiz drops the quiz and blocks start while keeping the room', () => {
+  const { manager, sends } = makeHarness()
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(3),
+  })
+  const ana = manager.joinRoom('player-1', code, 'Ana')
+  readyAll(manager, code)
+  assert.equal(manager.rooms.get(code).quizReady, true)
+
+  manager.clearRoomQuiz('host-1')
+
+  const room = manager.rooms.get(code)
+  assert.equal(room.phase, 'lobby')
+  assert.equal(room.questions.length, 0)
+  assert.equal(room.quizReady, false)
+  // same code + roster kept, ready reset so players re-confirm the new quiz
+  assert.equal(room.players.has(ana.playerId), true)
+  assert.equal(room.players.get(ana.playerId).ready, false)
+  // the stale quiz can no longer be started
+  assert.throws(() => manager.startGame('host-1'), /generat/i)
+
+  const toLobby = sentTo(sends, 'all').filter((m) => m.type === 'room-to-lobby')
+  assert.equal(toLobby[toLobby.length - 1].quizReady, false)
+})
+
+test('clearRoomQuiz is host-only', () => {
+  const { manager } = makeHarness()
+  const { code } = manager.createRoom('host-1', {
+    topic: 'JS',
+    timerSeconds: TIMER,
+    maxPlayers: 10,
+    questions: makeQuestions(1),
+  })
+  manager.joinRoom('player-1', code, 'Ana')
+  assert.throws(() => manager.clearRoomQuiz('player-1'), /host/i)
+})
+
 test('backToLobby rejects non-hosts and rooms that are not finished', () => {
   const { manager } = makeHarness()
   const { code } = manager.createRoom('host-1', {
