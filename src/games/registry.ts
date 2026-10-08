@@ -12,7 +12,7 @@ export interface GameDefinition {
   /** Shown on the card and in the header. */
   name: string
   tagline: string
-  /** Card art. Emoji, matching the app's playful card style. */
+  /** Card art: an Iconify (lucide) name, rendered inside a tinted badge. */
   icon: string
   path: string
   modes: GameMode[]
@@ -26,7 +26,7 @@ export const GAMES: GameDefinition[] = [
     id: 'quiz',
     name: 'Quiznix AI',
     tagline: 'Turn any topic into a quiz — solo, or live against friends.',
-    icon: '📝',
+    icon: 'lucide:notebook-pen',
     path: '/quiz',
     modes: ['solo', 'group'],
     requiresAi: true,
@@ -36,7 +36,7 @@ export const GAMES: GameDefinition[] = [
     id: 'hanoi',
     name: 'Tower of Hanoi',
     tagline: 'Stack every disk and chase your best solve.',
-    icon: '🗼',
+    icon: 'lucide:layers',
     path: '/hanoi',
     modes: ['solo'],
     load: () => import('./hanoi/HanoiFlow.vue'),
