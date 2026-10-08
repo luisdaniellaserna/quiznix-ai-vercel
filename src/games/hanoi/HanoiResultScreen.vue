@@ -1,9 +1,9 @@
 <script lang="ts" setup>
 import { computed } from 'vue'
 import { Icon } from '@iconify/vue'
-import { MAX_DISKS, optimalMoves } from '../../shared/hanoiRules.mjs'
-import { formatDuration } from '../games/hanoi/format'
-import ConfettiBurst from './ConfettiBurst.vue'
+import { MAX_DISKS, optimalMoves } from '../../../shared/hanoiRules.mjs'
+import { formatDuration } from './format'
+import ConfettiBurst from '../../shell/ConfettiBurst.vue'
 
 const props = defineProps<{
   disks: number

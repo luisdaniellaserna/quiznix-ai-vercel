@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { computed } from 'vue'
-import ConfettiBurst from './ConfettiBurst.vue'
+import ConfettiBurst from '../shell/ConfettiBurst.vue'
 
 const props = defineProps<{
   userAnswers: UserAnswer[]

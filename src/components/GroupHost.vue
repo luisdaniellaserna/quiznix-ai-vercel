@@ -3,8 +3,8 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { roomServerOrigin, useGroupStore } from '../stores/groupStore'
 import { useCountdown } from '../composables/useCountdown'
-import SettingsMenu from './SettingsMenu.vue'
-import ConfettiBurst from './ConfettiBurst.vue'
+import { clearGameContext, clearQuitAction, setGameContext, setQuitAction } from '../shell/chrome'
+import ConfettiBurst from '../shell/ConfettiBurst.vue'
 import FinalLeaderboard from './FinalLeaderboard.vue'
 import LobbyChat from './LobbyChat.vue'
 import ConnectionBanner from './ConnectionBanner.vue'
@@ -106,6 +106,22 @@ if (typeof document !== 'undefined') {
   })
 }
 onUnmounted(() => releaseWakeLock())
+
+// the shell owns the chrome now: this component only declares its role and when
+// leaving the room is on offer
+setGameContext('Host')
+watch(
+  () => store.phase,
+  (phase) => {
+    if (phase === 'lobby' || phase === 'question') setQuitAction('Exit quiz', requestExit)
+    else clearQuitAction()
+  },
+  { immediate: true },
+)
+onUnmounted(() => {
+  clearQuitAction()
+  clearGameContext()
+})
 
 function optionCount(option: string) {
   return Object.values(store.liveAnswers).filter((a) => a.option === option).length
@@ -215,18 +231,6 @@ function playAgain() {
 
 <template>
   <div class="min-h-screen overflow-x-hidden bg-base-100 text-base-content">
-    <header class="navbar bg-base-200 px-4 py-4 shadow-sm">
-      <div class="navbar-start">
-        <span class="text-xl font-bold">Quiznix AI</span>
-        <span class="badge badge-secondary badge-sm mx-2 hidden sm:inline-flex">Host</span>
-      </div>
-      <div class="navbar-end gap-2">
-        <SettingsMenu
-          :show-exit="store.phase === 'lobby' || store.phase === 'question'"
-          @exit-quiz="requestExit"
-        />
-      </div>
-    </header>
 
     <main class="mx-auto w-full max-w-6xl p-4">
       <div

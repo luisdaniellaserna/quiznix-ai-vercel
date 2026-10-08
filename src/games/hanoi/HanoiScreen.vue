@@ -22,11 +22,11 @@ import {
   topDisk,
   type Board,
   type Move,
-} from '../../shared/hanoiRules.mjs'
-import { useStopwatch } from '../composables/useStopwatch'
-import { isDragGesture, pegAtPoint, type PegRect } from '../games/hanoi/drag'
-import { formatDuration } from '../games/hanoi/format'
-import { diskLiftShadow, diskShadow, diskSurface, diskWidthPercent } from '../games/hanoi/visuals'
+} from '../../../shared/hanoiRules.mjs'
+import { useStopwatch } from './useStopwatch'
+import { isDragGesture, pegAtPoint, type PegRect } from './drag'
+import { formatDuration } from './format'
+import { diskLiftShadow, diskShadow, diskSurface, diskWidthPercent } from './visuals'
 
 const props = defineProps<{ disks: number }>()
 

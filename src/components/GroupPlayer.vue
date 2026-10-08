@@ -3,8 +3,8 @@ import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { roomServerOrigin, useGroupStore } from '../stores/groupStore'
 import { useCountdown } from '../composables/useCountdown'
-import SettingsMenu from './SettingsMenu.vue'
-import ConfettiBurst from './ConfettiBurst.vue'
+import { clearGameContext, setGameContext } from '../shell/chrome'
+import ConfettiBurst from '../shell/ConfettiBurst.vue'
 import FinalLeaderboard from './FinalLeaderboard.vue'
 import LobbyChat from './LobbyChat.vue'
 import ConnectionBanner from './ConnectionBanner.vue'
@@ -210,6 +210,10 @@ if (typeof document !== 'undefined') {
 }
 onUnmounted(() => releaseWakeLock())
 
+// the player's role is shown by the shell header rather than its own nav
+setGameContext('Player')
+onUnmounted(clearGameContext)
+
 // Sidebar stats — derive from store so they refresh automatically as messages arrive.
 const totalRoster = computed(() => store.players.length)
 const answeredDisplay = computed(() =>
@@ -315,14 +319,6 @@ function confirmLeave() {
 
 <template>
   <div class="min-h-screen overflow-x-hidden bg-base-100 text-base-content">
-    <header class="navbar bg-base-200 px-4 py-4 shadow-sm">
-      <div class="navbar-start">
-        <span class="text-xl font-bold">Quiznix AI</span>
-      </div>
-      <div class="navbar-end">
-        <SettingsMenu />
-      </div>
-    </header>
 
     <main class="mx-auto w-full max-w-6xl p-4">
       <!-- closed by the host or a lost connection — also shown as modal -->

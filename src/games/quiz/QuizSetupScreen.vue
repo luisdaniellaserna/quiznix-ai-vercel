@@ -1,13 +1,9 @@
 <script lang="ts" setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import pkg from '../../package.json'
-import { MODE_CONFIG, type GameMode, type Mode } from '../quizConfig'
-import SettingsMenu from './SettingsMenu.vue'
-import { prefetchUselessFact } from '../composables/useUselessFact'
-import { useGroupStore } from '../stores/groupStore'
-import { MAX_DISKS, MIN_DISKS, optimalMoves } from '../../shared/hanoiRules.mjs'
-import { loadBests } from '../games/hanoi/bests'
-import { formatDuration } from '../games/hanoi/format'
+import { useRouter } from 'vue-router'
+import { MODE_CONFIG, type GameMode, type Mode } from '../../quizConfig'
+import { prefetchUselessFact } from '../../composables/useUselessFact'
+import { useGroupStore } from '../../stores/groupStore'
 
 // Warm the trivia cache while the user fills the form, so the loading screen
 // opens with a fresh fact and shows it stably (no mid-read swap).
@@ -24,8 +20,7 @@ onUnmounted(() => {
 })
 
 const groupStore = useGroupStore()
-
-const appVersion = `v${pkg.version}`
+const router = useRouter()
 
 const emit = defineEmits<{
   'start-quiz': [
@@ -40,7 +35,6 @@ const emit = defineEmits<{
     },
   ]
   'join-group': [payload: { code: string; name: string }]
-  'start-hanoi': [payload: { disks: number }]
   'cancel-edit': []
   'resume-host': []
 }>()
@@ -50,11 +44,9 @@ const props = defineProps<{
   /** Set when the host hit "Play again" on the group leaderboard — prefill
    * the form with their last group settings and jump straight to it. */
   fromGroupReplay?: boolean
-  /** Set when the player left a Tower of Hanoi run — reopen the size picker. */
-  fromHanoi?: boolean
 }>()
 
-type Step = 'landing' | 'game' | 'mode' | 'form' | 'groupChoice' | 'groupJoin' | 'hanoi'
+type Step = 'mode' | 'form' | 'groupChoice' | 'groupJoin'
 
 const topic = ref('')
 const extraTopics = ref<string[]>([])
@@ -65,10 +57,8 @@ const timed = ref(true)
 const maxParticipants = ref(10)
 const timePerQuestion = ref(MODE_CONFIG.easy.timerSeconds)
 const timeTouched = ref(false)
-const step = ref<Step>('landing')
-const hanoiDisks = ref(4)
-const hanoiBests = ref(loadBests())
-const HANOI_SETUP_KEY = 'quiznix-hanoi-setup'
+// straight to the solo-or-group choice: the dashboard already picked the game
+const step = ref<Step>('mode')
 const joinCode = ref('')
 const joinName = ref('')
 const joinCodeFromUrl =
@@ -114,9 +104,6 @@ function dismissHostResume() {
 watch(step, () => refreshHostResumeOffer())
 
 const allTopics = computed(() => extraTopics.value.filter((item) => item !== ''))
-
-const diskOptions = Array.from({ length: MAX_DISKS - MIN_DISKS + 1 }, (_, i) => MIN_DISKS + i)
-const hanoiBest = computed(() => hanoiBests.value[hanoiDisks.value] ?? null)
 
 function addTopic() {
   const value = topic.value.trim()
@@ -187,23 +174,6 @@ if (props.fromGroupReplay) {
   }
 }
 
-// Player left a Tower of Hanoi run — reopen the size picker with their last size
-if (props.fromHanoi) {
-  const saved = localStorage.getItem(HANOI_SETUP_KEY)
-  if (saved) {
-    try {
-      const s = JSON.parse(saved) as { disks?: number }
-      const saved_disks = Number(s.disks)
-      if (Number.isInteger(saved_disks) && saved_disks >= MIN_DISKS && saved_disks <= MAX_DISKS) {
-        hanoiDisks.value = saved_disks
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-  step.value = 'hanoi'
-}
-
 const canStart = computed(() => {
   if (allTopics.value.length === 0 || !Number.isFinite(itemCount.value) || itemCount.value < 1) {
     return false
@@ -249,25 +219,6 @@ function saveSettings() {
   }
 }
 
-const steps = [
-  {
-    title: 'Pick your topics',
-    text: 'Add one topic or several — questions mix and shuffle across them.',
-  },
-  {
-    title: 'Choose how to play',
-    text: 'Solo with a timer or at your own pace, or host a live group room.',
-  },
-  {
-    title: 'Answer fast',
-    text: 'In group mode, correct answers earn up to 10 points — the faster you answer, the more you score.',
-  },
-  {
-    title: 'See the results',
-    text: 'Review your answers solo, or climb the live leaderboard with your group.',
-  },
-]
-
 function onModeChange(event: Event) {
   mode.value = (event.target as HTMLSelectElement).value as Mode
   if (!timeTouched.value) {
@@ -281,32 +232,8 @@ function scrollToStep(sectionId: string) {
   })
 }
 
-function startSetup() {
-  step.value = 'game'
-  scrollToStep('setup')
-}
-
-function pickGame(game: 'quiz' | 'hanoi') {
-  step.value = game === 'quiz' ? 'mode' : 'hanoi'
-  scrollToStep('setup')
-}
-
-function selectHanoiDisks(disks: number) {
-  hanoiDisks.value = disks
-}
-
-function startHanoi() {
-  try {
-    localStorage.setItem(HANOI_SETUP_KEY, JSON.stringify({ disks: hanoiDisks.value }))
-  } catch {
-    /* ignore */
-  }
-  emit('start-hanoi', { disks: hanoiDisks.value })
-}
-
-function backToGame() {
-  step.value = 'game'
-  scrollToStep('setup')
+function backToDashboard() {
+  void router.push('/')
 }
 
 function pickGameMode(selected: GameMode) {
@@ -351,10 +278,6 @@ function backToMode() {
   scrollToStep('setup')
 }
 
-function backToLanding() {
-  step.value = 'landing'
-}
-
 function backToGroupChoice() {
   step.value = 'groupChoice'
   scrollToStep('setup')
@@ -375,247 +298,10 @@ function start() {
 </script>
 
 <template>
-  <div
-    class="relative min-h-screen overflow-x-hidden text-base-content"
-    style="
-      background: linear-gradient(
-        160deg,
-        color-mix(in oklab, var(--color-primary) 25%, var(--color-base-100)) 0%,
-        color-mix(in oklab, var(--color-secondary) 35%, var(--color-base-100)) 55%,
-        color-mix(in oklab, var(--color-accent) 30%, var(--color-base-100)) 100%
-      );
-    "
-  >
-    <!-- smooth mesh glow overlay -->
-    <div
-      class="pointer-events-none absolute inset-x-0 top-0 h-3/4 [background-image:radial-gradient(55%_75%_at_18%_8%,color-mix(in_oklab,var(--color-primary)_24%,transparent)_0%,transparent_72%),radial-gradient(45%_65%_at_82%_18%,color-mix(in_oklab,var(--color-secondary)_22%,transparent)_0%,transparent_72%),radial-gradient(38%_55%_at_55%_42%,color-mix(in_oklab,var(--color-accent)_16%,transparent)_0%,transparent_68%)] [mask-image:linear-gradient(to_bottom,#000_35%,transparent)]"
-    ></div>
-
-    <!-- navbar -->
-    <header class="relative z-20">
-      <nav
-        class="mx-auto flex w-full max-w-4xl items-center justify-between px-4 pb-6 pt-8 sm:px-6 sm:pb-8 sm:pt-12 lg:px-8"
-      >
-        <span class="text-2xl font-black tracking-tight">Quiznix AI</span>
-        <SettingsMenu />
-      </nav>
-    </header>
-
-    <!-- hero -->
-    <section class="relative z-10 mx-auto max-w-4xl px-6 pt-8 text-center sm:pt-12">
-      <div class="relative inline-block">
-        <svg
-          class="sparkle sparkle-a absolute -left-6 -top-2 hidden h-6 w-6 fill-current text-primary/70 drop-shadow-[0_2px_10px_color-mix(in_oklab,var(--color-primary)_35%,transparent)] sm:-left-10 sm:-top-4 sm:block sm:h-8 sm:w-8"
-          style="rotate: -12deg"
-          viewBox="0 0 24 24"
-        >
-          <path
-            d="M12 0C13.5 8.5 15.5 10.5 24 12C15.5 13.5 13.5 15.5 12 24C10.5 15.5 8.5 13.5 0 12C8.5 10.5 10.5 8.5 12 0Z"
-          />
-        </svg>
-        <svg
-          class="sparkle sparkle-b absolute -right-8 top-0 hidden h-8 w-8 fill-current text-secondary/70 drop-shadow-[0_2px_10px_color-mix(in_oklab,var(--color-secondary)_35%,transparent)] sm:-right-14 sm:block sm:h-10 sm:w-10"
-          style="rotate: 12deg"
-          viewBox="0 0 24 24"
-        >
-          <path
-            d="M12 0C13.5 8.5 15.5 10.5 24 12C15.5 13.5 13.5 15.5 12 24C10.5 15.5 8.5 13.5 0 12C8.5 10.5 10.5 8.5 12 0Z"
-          />
-        </svg>
-        <svg
-          class="sparkle sparkle-c absolute -right-10 top-1/2 hidden h-6 w-6 fill-current text-accent/70 drop-shadow-[0_2px_10px_color-mix(in_oklab,var(--color-accent)_35%,transparent)] sm:-right-20 sm:block sm:h-7 sm:w-7"
-          style="rotate: -6deg"
-          viewBox="0 0 24 24"
-        >
-          <path
-            d="M12 0C13.5 8.5 15.5 10.5 24 12C15.5 13.5 13.5 15.5 12 24C10.5 15.5 8.5 13.5 0 12C8.5 10.5 10.5 8.5 12 0Z"
-          />
-        </svg>
-        <h1 class="text-4xl font-black leading-tight tracking-tight sm:text-5xl md:text-7xl">
-          Get addicted<br />to learning
-        </h1>
-      </div>
-      <p class="mx-auto mt-6 max-w-xl text-lg font-medium opacity-80">
-        Learn any topic you want — AI quizzes make studying easy.
-      </p>
-      <button
-        v-if="step === 'landing'"
-        class="btn btn-primary mt-8 h-12 rounded-full px-8 text-base font-semibold shadow-lg"
-        @click="startSetup"
-      >
-        🚀 Start learning
-      </button>
-    </section>
-
-    <!-- how it works (landing) -->
+  <div class="mx-auto w-full max-w-3xl">
+    <!-- game mode picker: this is where /quiz lands, the dashboard picked the game -->
     <section
-      v-if="step === 'landing'"
-      id="how-it-works"
-      class="relative z-10 mx-auto max-w-4xl px-6 pb-24 pt-20"
-    >
-      <h2 class="text-center text-3xl font-black tracking-tight md:text-4xl">How it works</h2>
-      <p class="mt-2 text-center font-medium opacity-80">From topic to score in four easy steps.</p>
-      <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div v-for="(step, index) in steps" :key="step.title" class="hover-3d">
-          <div class="relative rounded-2xl bg-base-100/90 p-5 shadow-lg backdrop-blur">
-            <div
-              class="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-content"
-            >
-              {{ index + 1 }}
-            </div>
-            <h3 class="mt-3 font-bold text-base-content">{{ step.title }}</h3>
-            <p class="mt-1 text-sm text-base-content/70">{{ step.text }}</p>
-          </div>
-          <div></div>
-          <div></div>
-          <div></div>
-          <div></div>
-          <div></div>
-          <div></div>
-          <div></div>
-          <div></div>
-        </div>
-      </div>
-    </section>
-
-    <p v-if="step === 'landing'" class="fixed bottom-3 left-4 z-10 text-xs opacity-50">
-      {{ appVersion }}
-    </p>
-
-    <!-- game picker: AI quiz or Tower of Hanoi -->
-    <section
-      v-else-if="step === 'game'"
-      id="setup"
-      class="relative z-10 mx-auto w-full max-w-3xl px-6 pb-24 pt-10"
-    >
-      <div class="relative mx-auto mt-8 max-w-3xl sm:mt-16">
-        <div class="rounded-2xl bg-base-100 shadow-2xl">
-          <span
-            class="absolute -left-6 -top-6 hidden -rotate-12 text-4xl drop-shadow-xl sm:-left-10 sm:-top-8 sm:block sm:text-6xl"
-            >📝</span
-          >
-          <span
-            class="absolute -right-6 bottom-4 hidden rotate-12 text-4xl drop-shadow-xl sm:-right-8 sm:bottom-6 sm:block sm:text-6xl"
-            >🗼</span
-          >
-
-          <div class="border-b border-base-300 px-6 py-4">
-            <div
-              class="flex items-center justify-center gap-2 text-base font-semibold text-base-content"
-            >
-              <span class="text-primary">▣</span> What do you want to play?
-            </div>
-          </div>
-
-          <div class="grid gap-5 p-6 sm:p-10 sm:grid-cols-2">
-            <button
-              class="group rounded-2xl border-2 border-base-300 p-6 text-left transition hover:border-primary hover:shadow-lg focus:outline-none"
-              @click="pickGame('quiz')"
-            >
-              <span class="text-4xl">📝</span>
-              <h3 class="mt-3 text-lg font-bold text-base-content">AI quiz</h3>
-              <p class="mt-1 text-sm text-base-content/70">
-                Turn any topic into a quiz. Play solo or host a live group room.
-              </p>
-            </button>
-            <button
-              class="group rounded-2xl border-2 border-base-300 p-6 text-left transition hover:border-primary hover:shadow-lg focus:outline-none"
-              @click="pickGame('hanoi')"
-            >
-              <span class="text-4xl">🗼</span>
-              <h3 class="mt-3 text-lg font-bold text-base-content">Tower of Hanoi</h3>
-              <p class="mt-1 text-sm text-base-content/70">
-                Classic puzzle. Stack every disk and chase your best solve.
-              </p>
-            </button>
-          </div>
-
-          <div class="border-t border-base-300 px-6 py-4 text-center">
-            <button class="btn btn-soft btn-sm" @click="backToLanding">← Back</button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- tower of hanoi setup: pick the stack size -->
-    <section
-      v-else-if="step === 'hanoi'"
-      id="setup"
-      class="relative z-10 mx-auto w-full max-w-3xl px-6 pb-24 pt-10"
-    >
-      <div class="relative mx-auto mt-8 max-w-3xl sm:mt-16">
-        <div class="rounded-2xl bg-base-100 shadow-2xl">
-          <span
-            class="absolute -left-6 -top-6 hidden -rotate-12 text-4xl drop-shadow-xl sm:-left-10 sm:-top-8 sm:block sm:text-6xl"
-            >🗼</span
-          >
-          <span
-            class="absolute -right-6 bottom-4 hidden rotate-12 text-4xl drop-shadow-xl sm:-right-8 sm:bottom-6 sm:block sm:text-6xl"
-            >🧠</span
-          >
-
-          <div class="border-b border-base-300 px-6 py-4">
-            <div
-              class="flex items-center justify-center gap-2 text-base font-semibold text-base-content"
-            >
-              <span class="text-primary">▣</span> Tower of Hanoi — how big?
-            </div>
-          </div>
-
-          <div class="grid gap-5 p-6 sm:p-10">
-            <p class="text-sm opacity-70">
-              Move the whole stack to the far right peg. A larger disk never sits on a smaller one.
-              The clock runs while you solve — it measures you, it never stops you.
-            </p>
-
-            <div class="grid grid-cols-3 gap-2 sm:grid-cols-6">
-              <button
-                v-for="size in diskOptions"
-                :key="size"
-                type="button"
-                class="cursor-pointer rounded-xl border-2 px-2 py-3 text-center transition"
-                :class="
-                  size === hanoiDisks
-                    ? 'border-primary bg-primary/10'
-                    : 'border-base-300 hover:border-primary/60'
-                "
-                :aria-pressed="size === hanoiDisks"
-                @click="selectHanoiDisks(size)"
-              >
-                <span class="block text-xl font-black">{{ size }}</span>
-                <span class="block text-[10px] font-medium opacity-60">
-                  {{ optimalMoves(size) }} moves
-                </span>
-              </button>
-            </div>
-
-            <div class="rounded-xl border border-base-300 bg-base-200/50 p-4 text-sm">
-              <p class="font-semibold">Perfect solve: {{ optimalMoves(hanoiDisks) }} moves</p>
-              <p class="mt-1 opacity-70">
-                <template v-if="hanoiBest">
-                  Your best on {{ hanoiDisks }} disks: {{ hanoiBest.moves }} moves in
-                  {{ formatDuration(hanoiBest.ms) }}.
-                </template>
-                <template v-else>
-                  No record on {{ hanoiDisks }} disks yet — your first solve sets it.
-                </template>
-              </p>
-            </div>
-          </div>
-
-          <div class="border-t border-base-300 px-6 py-4">
-            <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:justify-center">
-              <button class="btn btn-soft btn-primary" @click="startHanoi">Start puzzle</button>
-              <button class="btn btn-soft btn-sm sm:self-center" @click="backToGame">← Back</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- game mode picker (replaces hero content after clicking start) -->
-    <section
-      v-else-if="step === 'mode'"
+      v-if="step === 'mode'"
       id="setup"
       class="relative z-10 mx-auto w-full max-w-3xl px-6 pb-24 pt-10"
     >
@@ -662,12 +348,7 @@ function start() {
           </div>
 
           <div class="border-t border-base-300 px-6 py-4 text-center">
-            <button
-              class="btn btn-soft btn-sm"
-              @click="backToGame"
-            >
-              ← Back
-            </button>
+            <button class="btn btn-soft btn-sm" @click="backToDashboard">← All games</button>
           </div>
         </div>
       </div>
@@ -736,12 +417,7 @@ function start() {
           </div>
 
           <div class="border-t border-base-300 px-6 py-4 text-center">
-            <button
-              class="btn btn-soft btn-sm"
-              @click="backToMode"
-            >
-              ← Back
-            </button>
+            <button class="btn btn-soft btn-sm" @click="backToMode">← Back</button>
           </div>
         </div>
       </div>
@@ -807,10 +483,7 @@ function start() {
           </form>
 
           <div class="border-t border-base-300 px-6 py-4 text-center">
-            <button
-              class="btn btn-soft btn-sm"
-              @click="backToGroupChoice"
-            >
+            <button class="btn btn-soft btn-sm" @click="backToGroupChoice">
               ← Back to group options
             </button>
           </div>
@@ -1004,18 +677,10 @@ function start() {
           </form>
 
           <div class="border-t border-base-300 px-6 py-4 text-center">
-            <button
-              v-if="!fromGroupReplay"
-              class="btn btn-soft btn-sm"
-              @click="backToMode"
-            >
+            <button v-if="!fromGroupReplay" class="btn btn-soft btn-sm" @click="backToMode">
               ← Change game mode
             </button>
-            <button
-              v-else
-              class="btn btn-soft btn-sm"
-              @click="emit('cancel-edit')"
-            >
+            <button v-else class="btn btn-soft btn-sm" @click="emit('cancel-edit')">
               ← Back to lobby
             </button>
           </div>
@@ -1024,28 +689,3 @@ function start() {
     </section>
   </div>
 </template>
-
-<style scoped>
-/* sparkle float animation */
-.sparkle {
-  animation: sparkle-float 4.5s ease-in-out infinite;
-}
-
-.sparkle-b {
-  animation-delay: -1.5s;
-}
-
-.sparkle-c {
-  animation-delay: -3s;
-}
-
-@keyframes sparkle-float {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-7px);
-  }
-}
-</style>
