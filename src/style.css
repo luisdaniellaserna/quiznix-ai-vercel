@@ -56,3 +56,25 @@
 .scrollbar-hidden::-webkit-scrollbar {
   display: none;
 }
+
+/* One content column for the whole app, so the header, the hero copy and the
+   page body share the same left and right edges. The hero's background still
+   goes full bleed — only its text sits in here. */
+.app-container {
+  margin-inline: auto;
+  width: 100%;
+  max-width: 1100px;
+  padding-inline: 1rem;
+}
+
+@media (min-width: 640px) {
+  .app-container {
+    padding-inline: 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .app-container {
+    padding-inline: 2rem;
+  }
+}

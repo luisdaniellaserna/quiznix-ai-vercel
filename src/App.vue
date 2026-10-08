@@ -4,10 +4,12 @@ import RoomGuard from './shell/RoomGuard.vue'
 </script>
 
 <template>
-  <div class="min-h-screen overflow-x-hidden bg-base-100 text-base-content">
+  <div class="flex min-h-screen flex-col overflow-x-hidden bg-base-100 text-base-content">
     <AppHeader />
 
-    <main class="mx-auto w-full max-w-5xl px-4 pb-16 pt-6">
+    <!-- no shared max-width here: each view owns its container so the dashboard
+         can paint a full-bleed background behind the whole page -->
+    <main class="flex flex-1 flex-col">
       <RouterView />
     </main>
 
