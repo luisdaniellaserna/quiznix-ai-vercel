@@ -28,6 +28,7 @@
     "openai": "^5.23.1",
     "pinia": "^3.0.3",
     "vue": "^3.5.18",
+    "vue-router": "^5.4.0",
     "ws": "^8.21.3"
   },
   "devDependencies": {
