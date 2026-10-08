@@ -1,18 +1,35 @@
-# Quiznix AI
+# Mind Gym
 
-AI-powered quiz generator with a small puzzle arcade. Type any topic — or
-several — and get a quiz generated on demand, then play it solo at your own pace
-or live against friends in a realtime group room. Or take on the Tower of Hanoi:
-a classic puzzle with a stopwatch and personal bests.
+A small collection of mind games behind one dashboard. The first is **Quiznix AI**,
+an AI-powered quiz generator: type any topic — or several — and get a quiz
+generated on demand, then play it solo at your own pace or live against friends in
+a realtime group room. The second is the **Tower of Hanoi**: a classic puzzle with
+a stopwatch and personal bests.
 
 Built with Vue 3, Vite, Tailwind CSS 4, daisyUI 5, and TypeScript.
 
 ## Games
 
-| Game | Modes | Notes |
-| ---- | ----- | ----- |
-| AI quiz | Solo, live group | Questions generated per request from one or more topics. |
-| Tower of Hanoi | Solo | 3–8 disks, move counter, hint, personal bests. |
+| Game           | Route    | Modes            | Notes                                                                     |
+| -------------- | -------- | ---------------- | ------------------------------------------------------------------------- |
+| Quiznix AI     | `/quiz`  | Solo, live group | Questions generated per request from one or more topics. Needs an AI key. |
+| Tower of Hanoi | `/hanoi` | Solo             | 3–8 disks, move counter, hint, personal bests.                            |
+
+### Adding a game
+
+Everything game-facing reads `src/games/registry.ts`, so a new game is one folder
+plus one entry there:
+
+1. Create `src/games/<id>/` with a `Flow.vue` that owns its own phases (setup →
+   play → results). Nothing in the shell knows about the phases.
+2. Put any logic the **room server** also needs in `shared/<id>Rules.mjs` — plain
+   ESM, imported by both the browser bundle and Node.
+3. Add a `GameDefinition` to `GAMES` in the registry: id, name, tagline, icon,
+   route path, modes, and a lazy `load`.
+4. Register a quit action if the game needs one:
+   `setQuitAction('Quit game', handler)` from `src/shell/chrome.ts`.
+
+The dashboard, the header and the navigation all pick it up automatically.
 
 ### Tower of Hanoi
 
@@ -37,7 +54,7 @@ Built with Vue 3, Vite, Tailwind CSS 4, daisyUI 5, and TypeScript.
   go back to review earlier questions, and finish with a results summary.
 - **Group mode** — host a room and friends join from their own devices with a
   6-character code (or a join link). Everyone answers the same question at the
-  same time; a live leaderboard ranks answers by correctness *and* speed.
+  same time; a live leaderboard ranks answers by correctness _and_ speed.
 - **Tower of Hanoi** — a solo puzzle game alongside the quiz: 3–8 disks,
   optimal-move hints, and personal bests per stack size.
 - **Settings menu** — 35 daisyUI themes with instant switching, an in-app help
@@ -48,13 +65,13 @@ Built with Vue 3, Vite, Tailwind CSS 4, daisyUI 5, and TypeScript.
 
 ## Tech stack
 
-| Layer        | Tech                                                               |
-| ------------ | ------------------------------------------------------------------ |
-| Frontend     | Vue 3 (`<script setup>`), Pinia, Vite, Tailwind CSS 4, daisyUI 5   |
-| Language     | TypeScript (strict)                                                 |
-| AI provider  | DeepSeek chat completions (via `openai`)                          |
-| Realtime     | Node room server using the `ws` package (no framework)             |
-| Testing      | Node's built-in `node:test` for the room server logic              |
+| Layer       | Tech                                                             |
+| ----------- | ---------------------------------------------------------------- |
+| Frontend    | Vue 3 (`<script setup>`), Pinia, Vite, Tailwind CSS 4, daisyUI 5 |
+| Language    | TypeScript (strict)                                              |
+| AI provider | DeepSeek chat completions (via `openai`)                         |
+| Realtime    | Node room server using the `ws` package (no framework)           |
+| Testing     | Node's built-in `node:test` for the room server logic            |
 
 ## Architecture
 
@@ -66,27 +83,31 @@ Browser (Vue 3 SPA)
                       └─ server owns game state: timers, live answers, scoring
 ```
 
-The frontend is a single-page app that asks the AI for questions and then
-renders the quiz; it never stores question history. Group mode adds a small
-in-memory room server (`server/`) that brokers realtime game state between the
+The frontend is a single-page app behind a router: the dashboard lists the games
+and each game is a lazily-loaded route that owns its own screens. Group mode adds a
+small in-memory room server (`server/`) that brokers realtime game state between the
 host and players over WebSocket. The Tower of Hanoi runs entirely in the browser
 — no server round-trips and no AI involved.
 
 ```
 src/
-  App.vue                    # top-level flow orchestrator (start → quiz/puzzle → results)
-  components/                # StartScreen, QuizScreen, ResultScreen, GroupHost,
-                             # GroupPlayer, HanoiScreen, HanoiResultScreen,
-                             # SettingsMenu, LoadingScreen
-  games/hanoi/               # bests.ts, format.ts (rules live in shared/)
+  App.vue                    # shell: header + <RouterView> + the cross-tab room guard
+  main.ts                    # app + pinia + router
+  router/index.ts            # routes; games are lazy chunks
+  shell/
+    AppHeader.vue            # brand, role badge, settings menu with the game's quit action
+    chrome.ts                # how a game flow registers its quit action and role
+    RoomGuard.vue            # "another tab took over" notice, visible on any route
+    SettingsMenu.vue         # themes, help, report, quit
+    ConfettiBurst.vue        # shared completion effect
+  dashboard/DashboardView.vue# the landing: cards built from the game registry
+  games/
+    registry.ts              # GAMES: the single manifest of playable games
+    hanoi/                   # Flow, SetupScreen, board, results, rules helpers, tests
+    quiz/                    # QuizFlow, QuizSetupScreen (+ the quiz's modules for now)
+  components/                # quiz screens/panels still living at the top level
   stores/groupStore.ts       # Pinia store: room lifecycle + WebSocket client
-  composables/useCountdown.ts# shared countdown (solo timer, group question timer)
-  composables/useStopwatch.ts# count-up solve timer (Tower of Hanoi)
-  quizConfig.ts              # difficulty presets (mode, timer, question count)
-  prompts.ts                 # LLM prompt building (multi-topic, shuffled)
-  scoring.ts                 # solo scoring (correct count)
-  groupProtocol.ts           # shared WS message types (client ↔ server)
-  jsonParse.ts               # tolerant JSON extraction from LLM responses
+  composables/               # useCountdown, useUselessFact (quiz-facing)
 shared/
   hanoiRules.mjs             # canonical Hanoi rules (plain ESM: Vite bundles it,
                              # the room server can import it with Node)
@@ -120,11 +141,11 @@ work out of the box.
 
 `VITE_*` variables live in `.env` (committed example: `.env.example`).
 
-| Variable                | Purpose                                                          |
-| ----------------------- | ---------------------------------------------------------------- |
-| `VITE_DEEPSEEK_API_KEY` | DeepSeek API key.                                                |
+| Variable                | Purpose                                                                                                                                                                                                                                                                                                                                            |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VITE_DEEPSEEK_API_KEY` | DeepSeek API key.                                                                                                                                                                                                                                                                                                                                  |
 | `VITE_WS_URL`           | Room server WebSocket URL; defaults to `ws://<page-host>:8787` (`wss://` when page is `https:`). For production (e.g. Vercel at `https://quiznix.vercel.app`) you **must** host the `server/` separately (Render/Fly/Railway with TLS) and set `VITE_WS_URL=wss://<your-ws-host>` — Vercel's static hosting cannot run the persistent `ws` server. |
-| `VITE_REPORT_EMAIL`     | Recipient of the in-app bug report email; unaddressed when empty. |
+| `VITE_REPORT_EMAIL`     | Recipient of the in-app bug report email; unaddressed when empty.                                                                                                                                                                                                                                                                                  |
 
 ## How the modes work
 
@@ -146,8 +167,9 @@ work out of the box.
    (2–100) and the time per question (5–300s). A 6-character room code is
    generated; share it or the "Copy join link" button.
 2. **Players:** open the app on their own device (the host's LAN address or the
-   join link, e.g. `?room=ABC123`), enter a name and the code, and join the
-   lobby. The host starts the game when everyone's in.
+   join link, e.g. `/join/ABC123`), enter a name and the code, and join the
+   lobby. The host starts the game when everyone's in. Older `?room=ABC123` links
+   still work — they redirect to the quiz using the same code.
 3. Everyone sees the same question and answers within the time limit; the host
    screen shows who has answered live.
 4. Scoring is speed-based: each correct answer earns 5.0–10.0 points depending
@@ -192,17 +214,17 @@ work out of the box.
 
 ## Scripts
 
-| Script            | Description                                        |
-| ----------------- | -------------------------------------------------- |
-| `npm run dev`     | Vite dev server (room server starts automatically) |
-| `npm run server`  | Room server only                                   |
-| `npm run dev:all` | Vite + room server (frees port 8787 first)         |
-| `npm run build`   | Type-check, then production build                  |
-| `npm run preview` | Preview the production build                       |
-| `npm run test:server` | Room server test suite (`node --test`)         |
-| `npm run test`    | Client logic test suite (vitest)                   |
-| `npm run lint`    | oxlint + eslint with autofix                       |
-| `npm run format`  | Prettier over `src/`, `shared/` and `server/`      |
+| Script                | Description                                        |
+| --------------------- | -------------------------------------------------- |
+| `npm run dev`         | Vite dev server (room server starts automatically) |
+| `npm run server`      | Room server only                                   |
+| `npm run dev:all`     | Vite + room server (frees port 8787 first)         |
+| `npm run build`       | Type-check, then production build                  |
+| `npm run preview`     | Preview the production build                       |
+| `npm run test:server` | Room server test suite (`node --test`)             |
+| `npm run test`        | Client logic test suite (vitest)                   |
+| `npm run lint`        | oxlint + eslint with autofix                       |
+| `npm run format`      | Prettier over `src/`, `shared/` and `server/`      |
 
 ## Testing
 
