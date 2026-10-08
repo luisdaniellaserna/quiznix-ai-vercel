@@ -87,7 +87,7 @@ let pulseTimer: ReturnType<typeof setTimeout> | undefined
 let settleTimer: ReturnType<typeof setTimeout> | undefined
 let settleFrame = 0
 
-const { elapsedMs, start, stop, reset } = useStopwatch()
+const { elapsedMs, startOnce, stop, reset } = useStopwatch()
 
 const pegs = Array.from({ length: PEG_COUNT }, (_, index) => index)
 const optimal = computed(() => optimalMoves(props.disks))
@@ -201,6 +201,9 @@ function pulse(peg: number) {
 }
 
 function commit(move: Move, { narrate = false }: { narrate?: boolean } = {}) {
+  // a completed move definitely counts as play, even if an earlier pickup was
+  // the thing that started the clock
+  startOnce()
   const disk = topDisk(board.value, move.from)
   board.value = applyMove(board.value, move.from, move.to)
   moves.value += 1
@@ -284,6 +287,8 @@ function onPointerMove(event: PointerEvent) {
     if (!isDragGesture(pointer.startX, pointer.startY, event.clientX, event.clientY)) return
     pointer.moved = true
     draggingPeg.value = pointer.peg
+    // a disk is now in hand, so the solve is under way
+    startOnce()
     ghost.value = { ...pointer.origin, disk: pointer.disk }
     void nextTick(() => applyGhostTransform(dx, dy))
   } else {
@@ -401,6 +406,8 @@ function activatePeg(peg: number) {
       return
     }
     held.value = { peg, disk }
+    // the disk is in hand: start the clock rather than counting page-idle time
+    startOnce()
     narration.value = `Disk ${disk} picked up from peg ${peg + 1}. Choose a peg with the arrow keys, then press Space to drop it, or Escape to cancel.`
     return
   }
@@ -472,8 +479,8 @@ function restart() {
   message.value = ''
   narration.value = ''
   solved.value = false
+  // clock back to zero and idle again until the next pickup or move
   reset()
-  start()
 }
 
 watch(
@@ -482,7 +489,7 @@ watch(
 )
 
 onMounted(() => {
-  start()
+  // the clock stays idle until the first pickup or move
   window.addEventListener('keydown', onGlobalKeydown)
   window.addEventListener('pointermove', onPointerMove)
   window.addEventListener('pointerup', onPointerUp)

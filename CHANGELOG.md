@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The Tower of Hanoi clock now starts on the player's first pickup or move
+  instead of the moment the board appears, so time spent reading the screen or
+  finding the controls is not counted against their solve.
 - The Tower of Hanoi celebration no longer waits for a personal best — every
   solved puzzle is rewarded, with a bigger burst for a minimum-move run or a new
   record.
