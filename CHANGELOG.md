@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A Mind Gym dashboard at `/` that lists the games as cards, replacing the quiz
+  start screen. Games are declared once in `src/games/registry.ts`, so adding one
+  is a folder plus a manifest entry.
+- Client-side routing with lazy game chunks. The dashboard's first paint dropped
+  from ~105 kB to ~56 kB gzip, with the quiz (and its AI client) loading only when
+  its route is opened.
+- `/join/ABC123` as a shareable room link, alongside the older `?room=ABC123`
+  form which now redirects to the quiz.
+- A second game: the Tower of Hanoi, reached at `/hanoi` and playable solo.
 - A confetti burst now rewards finishing a solo quiz. It is scaled up for a
   perfect score and withheld below half marks, so a poor result is not
   celebrated.
@@ -27,6 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The app is branded **Mind Gym** as the umbrella for its games; the quiz keeps
+  the Quiznix AI name on its own card and screen. `localStorage` keys are
+  unchanged (`quiznix-*`), so themes, setups and records carry over.
+- `App.vue` is now a thin shell (header + router view + the cross-tab room guard).
+  The quiz's flow, and the Tower of Hanoi's, each own their phases in
+  `src/games/<game>/`, so the shell no longer grows with every game.
+- Group rooms use the single shell header: the host/player role shows as a badge
+  beside the brand, and "Exit quiz" now appears in the shared settings menu
+  instead of a second per-screen header.
 - The Tower of Hanoi clock now starts on the player's first pickup or move
   instead of the moment the board appears, so time spent reading the screen or
   finding the controls is not counted against their solve.
