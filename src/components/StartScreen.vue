@@ -5,6 +5,9 @@ import { MODE_CONFIG, type GameMode, type Mode } from '../quizConfig'
 import SettingsMenu from './SettingsMenu.vue'
 import { prefetchUselessFact } from '../composables/useUselessFact'
 import { useGroupStore } from '../stores/groupStore'
+import { MAX_DISKS, MIN_DISKS, optimalMoves } from '../../shared/hanoiRules.mjs'
+import { loadBests } from '../games/hanoi/bests'
+import { formatDuration } from '../games/hanoi/format'
 
 // Warm the trivia cache while the user fills the form, so the loading screen
 // opens with a fresh fact and shows it stably (no mid-read swap).
@@ -37,6 +40,7 @@ const emit = defineEmits<{
     },
   ]
   'join-group': [payload: { code: string; name: string }]
+  'start-hanoi': [payload: { disks: number }]
   'cancel-edit': []
   'resume-host': []
 }>()
@@ -46,9 +50,11 @@ const props = defineProps<{
   /** Set when the host hit "Play again" on the group leaderboard — prefill
    * the form with their last group settings and jump straight to it. */
   fromGroupReplay?: boolean
+  /** Set when the player left a Tower of Hanoi run — reopen the size picker. */
+  fromHanoi?: boolean
 }>()
 
-type Step = 'landing' | 'mode' | 'form' | 'groupChoice' | 'groupJoin'
+type Step = 'landing' | 'game' | 'mode' | 'form' | 'groupChoice' | 'groupJoin' | 'hanoi'
 
 const topic = ref('')
 const extraTopics = ref<string[]>([])
@@ -60,6 +66,9 @@ const maxParticipants = ref(10)
 const timePerQuestion = ref(MODE_CONFIG.easy.timerSeconds)
 const timeTouched = ref(false)
 const step = ref<Step>('landing')
+const hanoiDisks = ref(4)
+const hanoiBests = ref(loadBests())
+const HANOI_SETUP_KEY = 'quiznix-hanoi-setup'
 const joinCode = ref('')
 const joinName = ref('')
 const joinCodeFromUrl =
@@ -105,6 +114,9 @@ function dismissHostResume() {
 watch(step, () => refreshHostResumeOffer())
 
 const allTopics = computed(() => extraTopics.value.filter((item) => item !== ''))
+
+const diskOptions = Array.from({ length: MAX_DISKS - MIN_DISKS + 1 }, (_, i) => MIN_DISKS + i)
+const hanoiBest = computed(() => hanoiBests.value[hanoiDisks.value] ?? null)
 
 function addTopic() {
   const value = topic.value.trim()
@@ -173,6 +185,23 @@ if (props.fromGroupReplay) {
       /* ignore */
     }
   }
+}
+
+// Player left a Tower of Hanoi run — reopen the size picker with their last size
+if (props.fromHanoi) {
+  const saved = localStorage.getItem(HANOI_SETUP_KEY)
+  if (saved) {
+    try {
+      const s = JSON.parse(saved) as { disks?: number }
+      const saved_disks = Number(s.disks)
+      if (Number.isInteger(saved_disks) && saved_disks >= MIN_DISKS && saved_disks <= MAX_DISKS) {
+        hanoiDisks.value = saved_disks
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  step.value = 'hanoi'
 }
 
 const canStart = computed(() => {
@@ -253,7 +282,30 @@ function scrollToStep(sectionId: string) {
 }
 
 function startSetup() {
-  step.value = 'mode'
+  step.value = 'game'
+  scrollToStep('setup')
+}
+
+function pickGame(game: 'quiz' | 'hanoi') {
+  step.value = game === 'quiz' ? 'mode' : 'hanoi'
+  scrollToStep('setup')
+}
+
+function selectHanoiDisks(disks: number) {
+  hanoiDisks.value = disks
+}
+
+function startHanoi() {
+  try {
+    localStorage.setItem(HANOI_SETUP_KEY, JSON.stringify({ disks: hanoiDisks.value }))
+  } catch {
+    /* ignore */
+  }
+  emit('start-hanoi', { disks: hanoiDisks.value })
+}
+
+function backToGame() {
+  step.value = 'game'
   scrollToStep('setup')
 }
 
@@ -430,6 +482,137 @@ function start() {
       {{ appVersion }}
     </p>
 
+    <!-- game picker: AI quiz or Tower of Hanoi -->
+    <section
+      v-else-if="step === 'game'"
+      id="setup"
+      class="relative z-10 mx-auto w-full max-w-3xl px-6 pb-24 pt-10"
+    >
+      <div class="relative mx-auto mt-8 max-w-3xl sm:mt-16">
+        <div class="rounded-2xl bg-base-100 shadow-2xl">
+          <span
+            class="absolute -left-6 -top-6 hidden -rotate-12 text-4xl drop-shadow-xl sm:-left-10 sm:-top-8 sm:block sm:text-6xl"
+            >📝</span
+          >
+          <span
+            class="absolute -right-6 bottom-4 hidden rotate-12 text-4xl drop-shadow-xl sm:-right-8 sm:bottom-6 sm:block sm:text-6xl"
+            >🗼</span
+          >
+
+          <div class="border-b border-base-300 px-6 py-4">
+            <div
+              class="flex items-center justify-center gap-2 text-base font-semibold text-base-content"
+            >
+              <span class="text-primary">▣</span> What do you want to play?
+            </div>
+          </div>
+
+          <div class="grid gap-5 p-6 sm:p-10 sm:grid-cols-2">
+            <button
+              class="group rounded-2xl border-2 border-base-300 p-6 text-left transition hover:border-primary hover:shadow-lg focus:outline-none"
+              @click="pickGame('quiz')"
+            >
+              <span class="text-4xl">📝</span>
+              <h3 class="mt-3 text-lg font-bold text-base-content">AI quiz</h3>
+              <p class="mt-1 text-sm text-base-content/70">
+                Turn any topic into a quiz. Play solo or host a live group room.
+              </p>
+            </button>
+            <button
+              class="group rounded-2xl border-2 border-base-300 p-6 text-left transition hover:border-primary hover:shadow-lg focus:outline-none"
+              @click="pickGame('hanoi')"
+            >
+              <span class="text-4xl">🗼</span>
+              <h3 class="mt-3 text-lg font-bold text-base-content">Tower of Hanoi</h3>
+              <p class="mt-1 text-sm text-base-content/70">
+                Classic puzzle. Stack every disk and chase your best solve.
+              </p>
+            </button>
+          </div>
+
+          <div class="border-t border-base-300 px-6 py-4 text-center">
+            <button class="btn btn-soft btn-sm" @click="backToLanding">← Back</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- tower of hanoi setup: pick the stack size -->
+    <section
+      v-else-if="step === 'hanoi'"
+      id="setup"
+      class="relative z-10 mx-auto w-full max-w-3xl px-6 pb-24 pt-10"
+    >
+      <div class="relative mx-auto mt-8 max-w-3xl sm:mt-16">
+        <div class="rounded-2xl bg-base-100 shadow-2xl">
+          <span
+            class="absolute -left-6 -top-6 hidden -rotate-12 text-4xl drop-shadow-xl sm:-left-10 sm:-top-8 sm:block sm:text-6xl"
+            >🗼</span
+          >
+          <span
+            class="absolute -right-6 bottom-4 hidden rotate-12 text-4xl drop-shadow-xl sm:-right-8 sm:bottom-6 sm:block sm:text-6xl"
+            >🧠</span
+          >
+
+          <div class="border-b border-base-300 px-6 py-4">
+            <div
+              class="flex items-center justify-center gap-2 text-base font-semibold text-base-content"
+            >
+              <span class="text-primary">▣</span> Tower of Hanoi — how big?
+            </div>
+          </div>
+
+          <div class="grid gap-5 p-6 sm:p-10">
+            <p class="text-sm opacity-70">
+              Move the whole stack to the far right peg. A larger disk never sits on a smaller one.
+              The clock runs while you solve — it measures you, it never stops you.
+            </p>
+
+            <div class="grid grid-cols-3 gap-2 sm:grid-cols-6">
+              <button
+                v-for="size in diskOptions"
+                :key="size"
+                type="button"
+                class="cursor-pointer rounded-xl border-2 px-2 py-3 text-center transition"
+                :class="
+                  size === hanoiDisks
+                    ? 'border-primary bg-primary/10'
+                    : 'border-base-300 hover:border-primary/60'
+                "
+                :aria-pressed="size === hanoiDisks"
+                @click="selectHanoiDisks(size)"
+              >
+                <span class="block text-xl font-black">{{ size }}</span>
+                <span class="block text-[10px] font-medium opacity-60">
+                  {{ optimalMoves(size) }} moves
+                </span>
+              </button>
+            </div>
+
+            <div class="rounded-xl border border-base-300 bg-base-200/50 p-4 text-sm">
+              <p class="font-semibold">Perfect solve: {{ optimalMoves(hanoiDisks) }} moves</p>
+              <p class="mt-1 opacity-70">
+                <template v-if="hanoiBest">
+                  Your best on {{ hanoiDisks }} disks: {{ hanoiBest.moves }} moves in
+                  {{ formatDuration(hanoiBest.ms) }}.
+                </template>
+                <template v-else>
+                  No record on {{ hanoiDisks }} disks yet — your first solve sets it.
+                </template>
+              </p>
+            </div>
+          </div>
+
+          <div class="border-t border-base-300 px-6 py-4">
+            <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:justify-center">
+              <button class="btn btn-soft btn-primary" @click="startHanoi">Start puzzle</button>
+              <button class="btn btn-soft btn-sm sm:self-center" @click="backToGame">← Back</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- game mode picker (replaces hero content after clicking start) -->
     <section
       v-else-if="step === 'mode'"
@@ -481,7 +664,7 @@ function start() {
           <div class="border-t border-base-300 px-6 py-4 text-center">
             <button
               class="btn btn-soft btn-sm"
-              @click="backToLanding"
+              @click="backToGame"
             >
               ← Back
             </button>

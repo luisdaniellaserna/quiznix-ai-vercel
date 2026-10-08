@@ -7,6 +7,8 @@ import OpenAI from 'openai'
 import ResultScreen from './components/ResultScreen.vue'
 import GroupHost from './components/GroupHost.vue'
 import GroupPlayer from './components/GroupPlayer.vue'
+import HanoiScreen from './components/HanoiScreen.vue'
+import HanoiResultScreen from './components/HanoiResultScreen.vue'
 import SettingsMenu from './components/SettingsMenu.vue'
 import { MODE_CONFIG, type GameMode, type Mode } from './quizConfig'
 import { buildQuizPrompt } from './prompts'
@@ -15,6 +17,7 @@ import { parseJsonResponse } from './jsonParse'
 import { useGroupStore } from './stores/groupStore'
 import { randomId } from './stores/groupTabSync'
 import { fillToCount, normalizeQuestion, sanitizeQuestions } from './quizGeneration'
+import { loadBests, recordSolve, saveBests, type HanoiBest } from './games/hanoi/bests'
 
 const apiKey = import.meta.env.VITE_DEEPSEEK_API_KEY
 
@@ -29,6 +32,22 @@ const selectedMode = ref<Mode>('easy')
 const timedMode = ref(true)
 const returnFromQuiz = ref(false)
 const hostReplayMode = ref(false)
+
+// Tower of Hanoi is a sibling flow to the quiz: it reuses the start screen and
+// the app shell, but owns its own phases so the quiz state machine stays intact.
+const fromHanoi = ref(false)
+const hanoiDisks = ref(4)
+const hanoiRun = ref(0)
+
+interface HanoiOutcome {
+  moves: number
+  ms: number
+  hintsUsed: number
+  best: HanoiBest | null
+  isNewBest: boolean
+  hadPreviousBest: boolean
+}
+const hanoiOutcome = ref<HanoiOutcome | null>(null)
 
 // one room session per browser — used to surface the cross-tab takeover confirm
 interface BlockingSession {
@@ -393,6 +412,7 @@ async function startQuiz(payload: {
   status.value = 'loading'
   isError.value = false
   returnFromQuiz.value = false
+  fromHanoi.value = false
   selectedMode.value = payload.mode
   timedMode.value = payload.timed
 
@@ -510,13 +530,57 @@ function leaveGroup() {
   groupStore.leave()
   status.value = 'start'
   returnFromQuiz.value = false
+  fromHanoi.value = false
 }
 
 function reset() {
   returnFromQuiz.value = true
   hostReplayMode.value = false
+  fromHanoi.value = false
   status.value = 'start'
   userAnswers.value = []
+}
+
+// --- Tower of Hanoi -------------------------------------------------------
+
+function startHanoi(payload: { disks: number }) {
+  fromHanoi.value = false
+  hanoiDisks.value = payload.disks
+  // a fresh instance per run, so "play again" resets board and clock
+  hanoiRun.value += 1
+  hanoiOutcome.value = null
+  status.value = 'hanoi'
+}
+
+function finishHanoi(result: { moves: number; ms: number; hintsUsed: number }) {
+  const bests = loadBests()
+  const hadPreviousBest = Boolean(bests[hanoiDisks.value])
+  const { bests: updated, best, isNewBest } = recordSolve(
+    bests,
+    hanoiDisks.value,
+    result.moves,
+    result.ms,
+  )
+  if (isNewBest) saveBests(updated)
+  hanoiOutcome.value = { ...result, best, isNewBest, hadPreviousBest }
+  status.value = 'hanoi-finished'
+}
+
+function exitHanoi() {
+  fromHanoi.value = true
+  hanoiOutcome.value = null
+  status.value = 'start'
+}
+
+function homeFromHanoi() {
+  fromHanoi.value = false
+  hanoiOutcome.value = null
+  status.value = 'start'
+}
+
+function onQuitRequested() {
+  if (status.value === 'hanoi' || status.value === 'hanoi-finished') exitHanoi()
+  else reset()
 }
 
 // Host clicked "Play again" on the leaderboard — move the room back to the
@@ -558,7 +622,9 @@ function cancelEditSetup() {
       v-if="status === 'start' && apiKey"
       :return-from-quiz="returnFromQuiz"
       :from-group-replay="hostReplayMode"
+      :from-hanoi="fromHanoi"
       @start-quiz="startQuiz"
+      @start-hanoi="startHanoi"
       @join-group="joinGroup"
       @cancel-edit="cancelEditSetup"
       @resume-host="status = 'group'"
@@ -582,13 +648,36 @@ function cancelEditSetup() {
           <span class="text-xl font-bold">Quiznix AI</span>
         </div>
         <div class="navbar-end">
-          <SettingsMenu :show-quit="status === 'ready'" @quit-quiz="reset" />
+          <SettingsMenu
+            :show-quit="status === 'ready' || status === 'hanoi'"
+            :quit-label="status === 'hanoi' ? 'Quit puzzle' : 'Quit quiz'"
+            @quit-quiz="onQuitRequested"
+          />
         </div>
       </header>
 
       <main class="container mx-auto p-4">
+        <HanoiScreen
+          v-if="status === 'hanoi'"
+          :key="hanoiRun"
+          :disks="hanoiDisks"
+          @solved="finishHanoi"
+        />
+        <HanoiResultScreen
+          v-else-if="status === 'hanoi-finished' && hanoiOutcome"
+          :disks="hanoiDisks"
+          :moves="hanoiOutcome.moves"
+          :ms="hanoiOutcome.ms"
+          :hints-used="hanoiOutcome.hintsUsed"
+          :best="hanoiOutcome.best"
+          :is-new-best="hanoiOutcome.isNewBest"
+          :had-previous-best="hanoiOutcome.hadPreviousBest"
+          @replay="startHanoi"
+          @change-size="exitHanoi"
+          @home="homeFromHanoi"
+        />
         <QuizScreen
-          v-if="status === 'ready'"
+          v-else-if="status === 'ready'"
           @store-answer="storeAnswer"
           @end-quiz="status = 'finished'"
           @previous="removeLastAnswer"
