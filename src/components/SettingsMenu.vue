@@ -59,10 +59,13 @@ const props = withDefaults(
   defineProps<{
     showQuit?: boolean
     showExit?: boolean
+    /** Wording for the quit affordance — the quiz and the puzzle share this menu. */
+    quitLabel?: string
   }>(),
   {
     showQuit: false,
     showExit: false,
+    quitLabel: 'Quit quiz',
   },
 )
 const emit = defineEmits(['quit-quiz', 'exit-quiz'])
@@ -155,17 +158,11 @@ onUnmounted(() => {
         Settings
       </h2>
       <div class="space-y-0.5">
-        <button
-          class="btn btn-ghost btn-sm w-full justify-start"
-          @click="openMenu('theme')"
-        >
+        <button class="btn btn-ghost btn-sm w-full justify-start" @click="openMenu('theme')">
           <Icon icon="lucide:palette" class="h-4 w-4 shrink-0 opacity-80" />
           Change Theme
         </button>
-        <button
-          class="btn btn-ghost btn-sm w-full justify-start"
-          @click="openMenu('help')"
-        >
+        <button class="btn btn-ghost btn-sm w-full justify-start" @click="openMenu('help')">
           <Icon icon="lucide:circle-question-mark" class="h-4 w-4 shrink-0 opacity-80" />
           Help
         </button>
@@ -175,13 +172,10 @@ onUnmounted(() => {
           @click="askQuit"
         >
           <Icon icon="lucide:log-out" class="h-4 w-4 shrink-0 opacity-80" />
-          Quit quiz
+          {{ props.quitLabel }}
         </button>
         <div v-if="props.showQuit" class="my-1 h-px bg-base-300"></div>
-        <button
-          class="btn btn-ghost btn-sm w-full justify-start"
-          @click="openMenu('report')"
-        >
+        <button class="btn btn-ghost btn-sm w-full justify-start" @click="openMenu('report')">
           <Icon icon="lucide:flag" class="h-4 w-4 shrink-0 opacity-80" />
           Report
         </button>
@@ -286,6 +280,16 @@ onUnmounted(() => {
             screen and keeps your setup.
           </p>
         </section>
+        <section>
+          <h4 class="mb-1 font-semibold">Tower of Hanoi</h4>
+          <p class="opacity-90">
+            Move the whole stack to the far right peg; only a smaller disk may rest on a larger one.
+            Grab the top disk and drag it onto another peg, or play with the keyboard: the arrow
+            keys choose a peg and Space picks up and drops. Hint reveals the perfect next move, and
+            the clock only measures your solve — it never ends the game. Your record is the fewest
+            moves, with the faster time breaking a tie.
+          </p>
+        </section>
       </div>
     </div>
     <form method="dialog" class="modal-backdrop">
@@ -336,7 +340,7 @@ onUnmounted(() => {
   <!-- Quit -->
   <dialog ref="quitDialogRef" class="modal">
     <div class="modal-box">
-      <h3 class="text-lg font-bold">Quit quiz?</h3>
+      <h3 class="text-lg font-bold">{{ props.quitLabel }}?</h3>
       <p class="py-4">Your progress will be lost. Are you sure you want to quit?</p>
       <div class="modal-action">
         <button class="btn btn-ghost" @click="quitDialogRef?.close()">Cancel</button>

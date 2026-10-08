@@ -1,10 +1,33 @@
 # Quiznix AI
 
-AI-powered quiz generator. Type any topic — or several — and get a quiz generated
-on demand, then play it solo at your own pace or live against friends in a
-realtime group room.
+AI-powered quiz generator with a small puzzle arcade. Type any topic — or
+several — and get a quiz generated on demand, then play it solo at your own pace
+or live against friends in a realtime group room. Or take on the Tower of Hanoi:
+a classic puzzle with a stopwatch and personal bests.
 
 Built with Vue 3, Vite, Tailwind CSS 4, daisyUI 5, and TypeScript.
+
+## Games
+
+| Game | Modes | Notes |
+| ---- | ----- | ----- |
+| AI quiz | Solo, live group | Questions generated per request from one or more topics. |
+| Tower of Hanoi | Solo | 3–8 disks, move counter, hint, personal bests. |
+
+### Tower of Hanoi
+
+- Pick a stack size from 3 to 8 disks; a perfect solve takes `2^n − 1` moves.
+- Drag the top disk of a peg onto another peg to move it. Only a smaller disk may
+  rest on a larger one; an illegal drop shakes the peg and sends the disk back.
+- Keyboard: the arrow keys choose a peg (or press `1`–`3` directly), `Space` or
+  `Enter` picks up the top disk and drops it, `Esc` cancels a pick. `H` hint (the
+  perfect next move, one hint per disk), `R` restart.
+- A hint arrives as a notification next to the board and rings the two pegs
+  involved.
+- The clock only measures your solve — it never ends the game. Your record per
+  disk count is the fewest moves, with the faster time breaking a tie.
+- Bests live in `localStorage` (`quiznix-hanoi-bests`); there is no account and
+  nothing is sent to a server.
 
 ## Features
 
@@ -15,6 +38,8 @@ Built with Vue 3, Vite, Tailwind CSS 4, daisyUI 5, and TypeScript.
 - **Group mode** — host a room and friends join from their own devices with a
   6-character code (or a join link). Everyone answers the same question at the
   same time; a live leaderboard ranks answers by correctness *and* speed.
+- **Tower of Hanoi** — a solo puzzle game alongside the quiz: 3–8 disks,
+  optimal-move hints, and personal bests per stack size.
 - **Settings menu** — 35 daisyUI themes with instant switching, an in-app help
   guide, and a bug report that drafts an email to the developer.
 - **Theme-adaptive UI** — everything derives from daisyUI theme tokens
@@ -44,20 +69,27 @@ Browser (Vue 3 SPA)
 The frontend is a single-page app that asks the AI for questions and then
 renders the quiz; it never stores question history. Group mode adds a small
 in-memory room server (`server/`) that brokers realtime game state between the
-host and players over WebSocket.
+host and players over WebSocket. The Tower of Hanoi runs entirely in the browser
+— no server round-trips and no AI involved.
 
 ```
 src/
-  App.vue                    # top-level flow orchestrator (start → quiz → results)
+  App.vue                    # top-level flow orchestrator (start → quiz/puzzle → results)
   components/                # StartScreen, QuizScreen, ResultScreen, GroupHost,
-                             # GroupPlayer, SettingsMenu, LoadingScreen
+                             # GroupPlayer, HanoiScreen, HanoiResultScreen,
+                             # SettingsMenu, LoadingScreen
+  games/hanoi/               # bests.ts, format.ts (rules live in shared/)
   stores/groupStore.ts       # Pinia store: room lifecycle + WebSocket client
   composables/useCountdown.ts# shared countdown (solo timer, group question timer)
+  composables/useStopwatch.ts# count-up solve timer (Tower of Hanoi)
   quizConfig.ts              # difficulty presets (mode, timer, question count)
   prompts.ts                 # LLM prompt building (multi-topic, shuffled)
   scoring.ts                 # solo scoring (correct count)
   groupProtocol.ts           # shared WS message types (client ↔ server)
   jsonParse.ts               # tolerant JSON extraction from LLM responses
+shared/
+  hanoiRules.mjs             # canonical Hanoi rules (plain ESM: Vite bundles it,
+                             # the room server can import it with Node)
 server/
   index.mjs                  # HTTP + WebSocket entry point
   roomManager.mjs            # room state machines, join codes, speed scoring
@@ -168,8 +200,9 @@ work out of the box.
 | `npm run build`   | Type-check, then production build                  |
 | `npm run preview` | Preview the production build                       |
 | `npm run test:server` | Room server test suite (`node --test`)         |
+| `npm run test`    | Client logic test suite (vitest)                   |
 | `npm run lint`    | oxlint + eslint with autofix                       |
-| `npm run format`  | Prettier over `src/` and `server/`                 |
+| `npm run format`  | Prettier over `src/`, `shared/` and `server/`      |
 
 ## Testing
 
@@ -178,5 +211,14 @@ leaderboards) is covered by the `node:test` suite in
 `server/roomManager.test.mjs`:
 
 ```sh
-npm run test:server
+npm run test:server   # room server suite (node:test)
+npm run test          # client logic suite (vitest)
+```
+
+Client-side logic (quiz generation and dedupe in `src/quizGeneration.test.ts`, the
+Tower of Hanoi rules and personal bests in `src/games/hanoi/*.test.ts`) runs under
+Vitest:
+
+```sh
+npm run test
 ```

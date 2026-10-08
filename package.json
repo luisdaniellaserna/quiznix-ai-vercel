@@ -20,7 +20,7 @@
     "lint:oxlint": "oxlint . --fix -D correctness --ignore-path .gitignore",
     "lint:eslint": "eslint . --fix",
     "lint": "run-s lint:*",
-    "format": "prettier --write src/ server/"
+    "format": "prettier --write src/ shared/ server/"
   },
   "dependencies": {
     "@iconify-json/lucide": "^1.2.128",
