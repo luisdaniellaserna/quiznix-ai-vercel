@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import { computed } from 'vue'
+import ConfettiBurst from './ConfettiBurst.vue'
 
 const props = defineProps<{
   userAnswers: UserAnswer[]
@@ -12,10 +13,23 @@ const emit = defineEmits(['reset'])
 const percentage = computed(() =>
   props.total > 0 ? Math.round((props.score / props.total) * 100) : 0,
 )
+
+const isPerfectScore = computed(() => props.total > 0 && props.score === props.total)
+/**
+ * Finishing is worth celebrating, but a confetti burst over "0 / 10" reads as
+ * mockery, so the reward is gated on at least half right.
+ */
+const deservesConfetti = computed(() => props.total > 0 && percentage.value >= 50)
 </script>
 
 <template>
   <div class="mx-auto mt-6 w-full max-w-2xl space-y-4 p-4 sm:p-0">
+    <ConfettiBurst
+      v-if="deservesConfetti"
+      :particle-count="isPerfectScore ? 180 : 90"
+      :duration-ms="isPerfectScore ? 3200 : 2200"
+    />
+
     <div class="stats stats-vertical sm:stats-horizontal shadow w-full bg-base-200">
       <div class="stat">
         <div class="stat-title">Score</div>
@@ -28,13 +42,21 @@ const percentage = computed(() =>
       v-for="(userAnswer, index) in userAnswers"
       :key="index"
       class="card bg-base-100 shadow border-l-4"
-      :class="userAnswer.answer === userAnswer.question.correct_answer ? 'border-success' : 'border-error'"
+      :class="
+        userAnswer.answer === userAnswer.question.correct_answer ? 'border-success' : 'border-error'
+      "
     >
       <div class="card-body py-4">
         <h3 class="break-words font-semibold">{{ userAnswer.question.question }}</h3>
         <p>
           <span class="opacity-70">Your answer: </span>
-          <span :class="userAnswer.answer === userAnswer.question.correct_answer ? 'text-success' : 'text-error'">
+          <span
+            :class="
+              userAnswer.answer === userAnswer.question.correct_answer
+                ? 'text-success'
+                : 'text-error'
+            "
+          >
             {{ userAnswer.answer || 'No answer (timed out)' }}
           </span>
         </p>
@@ -42,12 +64,20 @@ const percentage = computed(() =>
           <span class="opacity-70">Correct answer: </span>
           <span class="text-success">{{ userAnswer.question.correct_answer }}</span>
         </p>
-        <p v-if="userAnswer.answer !== userAnswer.question.correct_answer && userAnswer.question.explanation" class="text-sm opacity-80">
+        <p
+          v-if="
+            userAnswer.answer !== userAnswer.question.correct_answer &&
+            userAnswer.question.explanation
+          "
+          class="text-sm opacity-80"
+        >
           {{ userAnswer.question.explanation }}
         </p>
       </div>
     </div>
 
-    <button class="btn btn-soft btn-primary w-full sm:w-auto btn-lg" @click="emit('reset')">Reset</button>
+    <button class="btn btn-soft btn-primary w-full sm:w-auto btn-lg" @click="emit('reset')">
+      Reset
+    </button>
   </div>
 </template>
