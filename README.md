@@ -13,7 +13,7 @@ Built with Vue 3, Vite, Tailwind CSS 4, daisyUI 5, and TypeScript.
 | Game           | Route    | Modes            | Notes                                                                     |
 | -------------- | -------- | ---------------- | ------------------------------------------------------------------------- |
 | Quiznix AI     | `/quiz`  | Solo, live group | Questions generated per request from one or more topics. Needs an AI key. |
-| Tower of Hanoi | `/hanoi` | Solo             | 3–8 disks, move counter, hint, personal bests.                            |
+| Tower of Hanoi | `/hanoi` | Solo, race    | 3–8 disks, move counter, hint, personal bests. Race needs 2+ players. |
 
 ### Adding a game
 
@@ -45,6 +45,19 @@ The dashboard, the header and the navigation all pick it up automatically.
   disk count is the fewest moves, with the faster time breaking a tie.
 - Bests live in `localStorage` (`quiznix-hanoi-bests`); there is no account and
   nothing is sent to a server.
+
+### Tower of Hanoi race
+
+Pick **Race** on the `/hanoi` setup screen, enter your name, and **Host a race**
+— you race too. The room code appears in the lobby with a copy-join-link; friends
+either type the code or open the link (`?room=ABC123`) with their own name.
+Everyone solves the same disks at once; two or more racers, all ready, before the
+race can start. The first to finish wins, and fewest moves then fewest hints break
+a tie — there is no time limit. Resolve or resign, or the host can end the race
+early; unfinished seats rank last. The server replays each submitted move log, so
+only a legal, genuinely solved board counts as a finish, and the finish time is
+the server's, not the client's. It runs on the same room server as the quiz
+(port 8787).
 
 ## Features
 

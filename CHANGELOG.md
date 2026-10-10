@@ -33,6 +33,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   race.
 - Client test suite (`npm run test`, vitest) covering the rules, the hint solver,
   personal-best tie-breaks, and clock formatting.
+- Tower of Hanoi **race mode**: host a race from `/hanoi`, friends join by code
+  or a `?room=CODE` link, and everyone solves the same puzzle at once. The
+  creator races too — they enter a name, take a seat, and share the room code —
+  holding host authority and a racer seat on one connection. First to finish
+  wins, with fewest moves then fewest hints breaking ties; no time limit. The
+  room server replays each submitted move log (`server/hanoiRace.mjs`), so a
+  finish only counts when the moves are legal and the board truly ends solved.
+  Only finishes are broadcast — no board state is streamed.
+- The room server is game-aware: quiz rooms and race rooms share one WebSocket
+  transport and the same room lifecycle (codes, roster, ready gate, grace,
+  rejoin), with a `game` dimension and a race state machine. The cross-tab "one
+  room per browser" guard is now per game, so a quiz room and a race can live in
+  separate tabs at once.
 
 ### Changed
 
