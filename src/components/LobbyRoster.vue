@@ -71,7 +71,7 @@ const readyCount = computed(() => props.players.filter((p) => p.ready).length)
               {{ p.ready ? 'Ready' : 'Not ready' }}
             </span>
             <button
-              v-if="isHost"
+              v-if="isHost && p.playerId !== selfId"
               class="btn btn-soft btn-error btn-xs"
               :aria-label="`Kick ${p.name}`"
               @click="emit('kick', p.playerId)"

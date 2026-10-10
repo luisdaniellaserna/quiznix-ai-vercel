@@ -1,4 +1,5 @@
 import { createHash, randomInt, randomUUID, timingSafeEqual } from 'node:crypto'
+import { HANOI_MIN_PLAYERS, assertValidDisks, rankHanoi, validateSolve } from './hanoiRace.mjs'
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 const CODE_LENGTH = 6
@@ -70,17 +71,17 @@ function secretMatches(storedHash, presented) {
 }
 
 /** Timer/cap validation shared by create + update (message text kept stable). */
-function assertValidSettings({ timerSeconds, maxPlayers }) {
-  if (
-    !Number.isFinite(timerSeconds) ||
-    timerSeconds <= 0 ||
-    timerSeconds > MAX_TIMER_SECONDS
-  ) {
-    throw new Error('Invalid timer setting.')
-  }
+function assertValidMaxPlayers(maxPlayers) {
   if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 100) {
     throw new Error('Max participants must be between 2 and 100.')
   }
+}
+
+function assertValidSettings({ timerSeconds, maxPlayers }) {
+  if (!Number.isFinite(timerSeconds) || timerSeconds <= 0 || timerSeconds > MAX_TIMER_SECONDS) {
+    throw new Error('Invalid timer setting.')
+  }
+  assertValidMaxPlayers(maxPlayers)
 }
 
 /** Non-empty question list validation (allows empty only at create-time for instant rooms). */
@@ -103,7 +104,11 @@ function validQuestion(q) {
 
 /** Non-empty question list validation (allows empty only at create-time for instant rooms). */
 function assertValidQuestions(questions) {
-  const valid = Array.isArray(questions) && questions.length > 0 && questions.length <= MAX_QUESTIONS && questions.every(validQuestion)
+  const valid =
+    Array.isArray(questions) &&
+    questions.length > 0 &&
+    questions.length <= MAX_QUESTIONS &&
+    questions.every(validQuestion)
   if (!valid) {
     throw new Error('Invalid question set.')
   }
@@ -179,11 +184,17 @@ export class RoomManager {
     this.messageBudgets.set(clientId, bucket)
   }
 
-  createRoom(clientId, { topic, timerSeconds, questions, maxPlayers }) {
+  createRoom(clientId, { game = 'quiz', topic, timerSeconds, questions, maxPlayers, disks }) {
+    const gameId = game === 'hanoi' ? 'hanoi' : 'quiz'
     const list = Array.isArray(questions) ? questions : []
-    assertValidSettings({ timerSeconds, maxPlayers })
-    if (list.length > 0) {
-      assertValidQuestions(list)
+    if (gameId === 'hanoi') {
+      assertValidMaxPlayers(maxPlayers)
+      assertValidDisks(disks)
+    } else {
+      assertValidSettings({ timerSeconds, maxPlayers })
+      if (list.length > 0) {
+        assertValidQuestions(list)
+      }
     }
     // One live room per host socket: a replayed create-room closes the prior
     // room instead of orphaning it with a host binding that blocks the sweep.
@@ -207,17 +218,19 @@ export class RoomManager {
     }
 
     const code = this.nextCode()
-    const quizReady = list.length > 0
     const hostSecret = newSecret()
-    this.rooms.set(code, {
+    const isQuiz = gameId === 'quiz'
+    const quizReady = isQuiz ? list.length > 0 : true
+    const room = {
       code,
+      game: gameId,
       hostClientId: clientId,
       hostSecretHash: hashSecret(hostSecret),
       hostDisconnectedAt: null,
-      topic: String(topic ?? '').slice(0, MAX_TOPIC_LENGTH),
-      timerSeconds,
+      topic: isQuiz ? String(topic ?? '').slice(0, MAX_TOPIC_LENGTH) : '',
+      timerSeconds: isQuiz ? timerSeconds : 0,
       maxPlayers,
-      questions: list,
+      questions: isQuiz ? list : [],
       quizReady,
       hostStatus: quizReady ? 'waiting-to-start' : 'generating',
       hostDetail: '',
@@ -227,9 +240,21 @@ export class RoomManager {
       countdownDeadline: 0,
       players: new Map(),
       createdAt: this.now(),
-    })
+    }
+    if (!isQuiz) {
+      room.disks = disks
+      // Race state: startedAt is stamped when the countdown ends; results holds
+      // one entry per resolved seat (finished/dnf), keyed by playerId.
+      room.gameState = { disks, startedAt: 0, results: new Map() }
+    }
+    this.rooms.set(code, room)
     this.hostRooms.set(clientId, code)
-    this.emit(code, 'host', { type: 'room-created', code, hostSecret }, clientId)
+    const created = { type: 'room-created', code, hostSecret }
+    if (!isQuiz) {
+      created.game = 'hanoi'
+      created.disks = disks
+    }
+    this.emit(code, 'host', created, clientId)
     return { code, hostSecret }
   }
 
@@ -277,18 +302,7 @@ export class RoomManager {
         this.emit(
           room.code,
           pid,
-          {
-            type: 'joined',
-            playerId: pid,
-            name: p.name,
-            roomCode: room.code,
-            players,
-            quizReady: room.quizReady,
-            hostStatus: room.hostStatus,
-            hostDetail: room.hostDetail,
-            resumeSecret,
-            resumeTtlMs: PLAYER_GRACE_MS,
-          },
+          this.joinedMessage(room, pid, p.name, players, resumeSecret),
           clientId,
         )
         this.broadcastRoster(room)
@@ -314,22 +328,33 @@ export class RoomManager {
     this.emit(
       room.code,
       playerId,
-      {
-        type: 'joined',
-        playerId,
-        name: trimmed,
-        roomCode: room.code,
-        players,
-        quizReady: room.quizReady,
-        hostStatus: room.hostStatus,
-        hostDetail: room.hostDetail,
-        resumeSecret,
-        resumeTtlMs: PLAYER_GRACE_MS,
-      },
+      this.joinedMessage(room, playerId, trimmed, players, resumeSecret),
       clientId,
     )
     this.broadcastRoster(room)
     return { code: room.code, playerId, resumeSecret }
+  }
+
+  /** The per-seat join payload; quiz rooms stay byte-identical, race rooms add
+   * their game + disk count so the lobby can show what is being raced. */
+  joinedMessage(room, playerId, name, players, resumeSecret) {
+    const message = {
+      type: 'joined',
+      playerId,
+      name,
+      roomCode: room.code,
+      players,
+      quizReady: room.quizReady,
+      hostStatus: room.hostStatus,
+      hostDetail: room.hostDetail,
+      resumeSecret,
+      resumeTtlMs: PLAYER_GRACE_MS,
+    }
+    if (room.game === 'hanoi') {
+      message.game = 'hanoi'
+      message.disks = room.gameState.disks
+    }
+    return message
   }
 
   /**
@@ -358,7 +383,7 @@ export class RoomManager {
         question.correctAnswer = q.correct_answer
       }
     }
-    return {
+    const sync = {
       type: 'state-sync',
       playerId: playerId ?? null,
       roomCode: room.code,
@@ -377,6 +402,16 @@ export class RoomManager {
       leaderboard: room.phase === 'finished' ? this.leaderboard(room) : null,
       serverNow: this.now(),
     }
+    if (room.game === 'hanoi') {
+      sync.game = 'hanoi'
+      sync.hanoi = {
+        disks: room.gameState.disks,
+        startedAt: room.gameState.startedAt,
+        standings: this.hanoiStandings(room),
+        myResult: playerId ? (room.gameState.results.get(playerId) ?? null) : null,
+      }
+    }
+    return sync
   }
 
   hostOfflineExpiresAt(room) {
@@ -453,6 +488,9 @@ export class RoomManager {
     if (room.phase !== 'lobby') {
       throw new Error('The game has already started.')
     }
+    if (room.game === 'hanoi') {
+      return this.startHanoi(room)
+    }
     if (!room.quizReady || room.questions.length === 0) {
       throw new Error('Finish generating questions before starting.')
     }
@@ -473,6 +511,198 @@ export class RoomManager {
     })
     this.broadcastHostStatus(room)
     this.scheduleAdvance(room, COUNTDOWN_MS)
+  }
+
+  /** Race start gate: two or more ready players, then the shared countdown. */
+  startHanoi(room) {
+    if (room.players.size < HANOI_MIN_PLAYERS) {
+      throw new Error('Add at least 2 players before starting a race.')
+    }
+    const notReady = [...room.players.values()].filter((p) => !p.ready).length
+    if (notReady > 0) {
+      throw new Error('Waiting for all players to be ready.')
+    }
+    room.phase = 'starting'
+    room.hostStatus = 'countdown'
+    room.countdownDeadline = this.now() + COUNTDOWN_MS
+    this.emit(room.code, 'all', {
+      type: 'game-starting',
+      deadline: room.countdownDeadline,
+      countdownSeconds: Math.round(COUNTDOWN_MS / 1000),
+    })
+    this.broadcastHostStatus(room)
+    this.scheduleAdvance(room, COUNTDOWN_MS)
+  }
+
+  /** Called when the start countdown elapses: stamp the shared start time. */
+  beginHanoiRace(room) {
+    room.phase = 'racing'
+    room.hostStatus = 'started'
+    room.countdownDeadline = 0
+    room.gameState.startedAt = this.now()
+    room.gameState.results.clear()
+    this.emit(room.code, 'all', {
+      type: 'hanoi-started',
+      game: 'hanoi',
+      disks: room.gameState.disks,
+      startedAt: room.gameState.startedAt,
+    })
+    this.broadcastHostStatus(room)
+  }
+
+  /**
+   * A player reports a solve. The server replays the move log, stamps the
+   * finish with its own clock (never the client's), then publishes standings.
+   */
+  finishHanoi(clientId, { moves, hintsUsed } = {}) {
+    const entry = this.playerRooms.get(clientId)
+    if (!entry) throw new Error('Player not found.')
+    const room = this.rooms.get(entry.code)
+    const player = room ? room.players.get(entry.playerId) : undefined
+    if (!room || !player) throw new Error('Player not found.')
+    if (room.game !== 'hanoi') throw new Error('This is not a race room.')
+    if (room.phase !== 'racing') throw new Error('The race has not started yet.')
+    if (room.gameState.results.has(entry.playerId)) {
+      throw new Error('You already finished this race.')
+    }
+    this.consumeRate(clientId)
+    const validated = validateSolve({ disks: room.gameState.disks, moves, hintsUsed })
+    room.gameState.results.set(entry.playerId, {
+      status: 'finished',
+      finishedAt: this.now(),
+      moves: validated.moves,
+      hintsUsed: validated.hintsUsed,
+      name: player.name,
+    })
+    this.broadcastHanoiStandings(room)
+    this.maybeFinishHanoi(room)
+    return { moves: validated.moves }
+  }
+
+  /** A player gives up; they are ranked after every finisher. */
+  resignHanoi(clientId) {
+    const entry = this.playerRooms.get(clientId)
+    if (!entry) throw new Error('Player not found.')
+    const room = this.rooms.get(entry.code)
+    const player = room ? room.players.get(entry.playerId) : undefined
+    if (!room || !player) throw new Error('Player not found.')
+    if (room.game !== 'hanoi') throw new Error('This is not a race room.')
+    if (room.phase !== 'racing') throw new Error('The race has not started yet.')
+    if (!room.gameState.results.has(entry.playerId)) {
+      room.gameState.results.set(entry.playerId, {
+        status: 'dnf',
+        finishedAt: this.now(),
+        moves: 0,
+        hintsUsed: 0,
+        name: player.name,
+      })
+      this.broadcastHanoiStandings(room)
+    }
+    this.maybeFinishHanoi(room)
+  }
+
+  /** Host ends the race early — every still-unresolved seat becomes a DNF. */
+  endHanoiRace(clientId) {
+    const room = this.roomOfHost(clientId)
+    if (room.game !== 'hanoi') throw new Error('This is not a race room.')
+    if (room.phase !== 'racing') throw new Error('The race has not started yet.')
+    for (const [playerId, player] of room.players) {
+      if (!room.gameState.results.has(playerId)) {
+        room.gameState.results.set(playerId, {
+          status: 'dnf',
+          finishedAt: this.now(),
+          moves: 0,
+          hintsUsed: 0,
+          name: player.name,
+        })
+      }
+    }
+    this.broadcastHanoiStandings(room)
+    this.finishHanoiRace(room)
+  }
+
+  broadcastHanoiStandings(room) {
+    this.emit(room.code, 'all', {
+      type: 'hanoi-standings',
+      standings: this.hanoiStandings(room),
+    })
+  }
+
+  /** The race ends once every seat has a result (finished or resigned). */
+  maybeFinishHanoi(room) {
+    if (room.phase !== 'racing') return
+    for (const playerId of room.players.keys()) {
+      if (!room.gameState.results.has(playerId)) return
+    }
+    this.finishHanoiRace(room)
+  }
+
+  finishHanoiRace(room) {
+    room.phase = 'finished'
+    room.hostStatus = 'started'
+    this.emit(room.code, 'all', {
+      type: 'hanoi-finished',
+      standings: this.hanoiStandings(room),
+    })
+  }
+
+  /**
+   * Merges resolved seats with seats still racing. Removed players (grace
+   * expiry, intentional leave) keep the result recorded when they resolved.
+   */
+  hanoiStandings(room) {
+    const entries = []
+    const seen = new Set()
+    for (const [playerId, result] of room.gameState.results) {
+      entries.push({
+        playerId,
+        name: result.name,
+        status: result.status,
+        finishedAt: result.finishedAt,
+        moves: result.moves,
+        hintsUsed: result.hintsUsed,
+      })
+      seen.add(playerId)
+    }
+    for (const [playerId, player] of room.players) {
+      if (seen.has(playerId)) continue
+      entries.push({
+        playerId,
+        name: player.name,
+        status: 'pending',
+        finishedAt: 0,
+        moves: 0,
+        hintsUsed: 0,
+      })
+    }
+    return rankHanoi(entries, room.gameState.startedAt)
+  }
+
+  /** Host changes the race setup from the lobby: disk count and player cap. */
+  updateHanoi(clientId, { disks, maxPlayers }) {
+    const room = this.roomOfHost(clientId)
+    if (room.game !== 'hanoi') throw new Error('This is not a race room.')
+    if (room.phase !== 'lobby') throw new Error('Settings can only change in the lobby.')
+    assertValidDisks(disks)
+    assertValidMaxPlayers(maxPlayers)
+    if (maxPlayers < room.players.size) {
+      throw new Error('New limit is below the current player count.')
+    }
+    room.gameState.disks = disks
+    room.disks = disks
+    room.maxPlayers = maxPlayers
+    room.hostStatus = 'waiting-to-start'
+    for (const player of room.players.values()) {
+      player.ready = false
+    }
+    this.emit(room.code, 'all', {
+      type: 'room-to-lobby',
+      game: 'hanoi',
+      players: this.playersOf(room),
+      disks,
+      quizReady: true,
+    })
+    this.broadcastHostStatus(room)
   }
 
   cancelStart(clientId) {
@@ -583,6 +813,26 @@ export class RoomManager {
     if (room.phase !== 'finished') {
       throw new Error('Can only return to the lobby after a finished game.')
     }
+    if (room.game === 'hanoi') {
+      room.phase = 'lobby'
+      room.gameState.startedAt = 0
+      room.gameState.results.clear()
+      room.countdownDeadline = 0
+      room.pendingAdvance = null
+      room.hostStatus = 'waiting-to-start'
+      for (const player of room.players.values()) {
+        player.ready = false
+      }
+      this.emit(room.code, 'all', {
+        type: 'room-to-lobby',
+        game: 'hanoi',
+        players: this.playersOf(room),
+        disks: room.gameState.disks,
+        quizReady: true,
+      })
+      this.broadcastHostStatus(room)
+      return
+    }
     room.phase = 'lobby'
     room.index = -1
     room.deadline = 0
@@ -648,6 +898,7 @@ export class RoomManager {
   // Ready is reset because the quiz changed; players must re-ready.
   updateRoomQuiz(clientId, { topic, timerSeconds, maxPlayers, questions }) {
     const room = this.roomOfHost(clientId)
+    if (room.game === 'hanoi') throw new Error('This is not a quiz room.')
     if (room.phase !== 'lobby') {
       throw new Error('Questions can only be updated from the lobby.')
     }
@@ -684,6 +935,7 @@ export class RoomManager {
   // host retries generation from the setup screen.
   clearRoomQuiz(clientId) {
     const room = this.roomOfHost(clientId)
+    if (room.game === 'hanoi') throw new Error('This is not a quiz room.')
     if (room.phase !== 'lobby') {
       throw new Error('Questions can only be updated from the lobby.')
     }
@@ -718,7 +970,8 @@ export class RoomManager {
       if (nowMs - room.pendingAdvance.scheduledAt < room.pendingAdvance.delayMs) continue
       room.pendingAdvance = null
       if (room.phase === 'starting') {
-        this.startQuestion(room, 0)
+        if (room.game === 'hanoi') this.beginHanoiRace(room)
+        else this.startQuestion(room, 0)
       } else if (room.phase === 'question') {
         this.advanceFromQuestion(room)
       }
@@ -857,9 +1110,25 @@ export class RoomManager {
     if (!player) {
       return { removed: false }
     }
+    this.recordHanoiDnf(room, entry.playerId, player.name)
     room.players.delete(entry.playerId)
     this.broadcastRoster(room)
+    if (room.game === 'hanoi') this.maybeFinishHanoi(room)
     return { removed: true, code: room.code, playerId: entry.playerId }
+  }
+
+  /** Records an unresolved seat as a DNF when it leaves a live race. No-op
+   * outside a race or when the seat already has a result. */
+  recordHanoiDnf(room, playerId, name) {
+    if (room.game === 'hanoi' && room.phase === 'racing' && !room.gameState.results.has(playerId)) {
+      room.gameState.results.set(playerId, {
+        status: 'dnf',
+        finishedAt: this.now(),
+        moves: 0,
+        hintsUsed: 0,
+        name,
+      })
+    }
   }
 
   /**
@@ -881,8 +1150,10 @@ export class RoomManager {
         this.playerRooms.delete(cid)
       }
     }
+    this.recordHanoiDnf(room, playerId, player.name)
     room.players.delete(playerId)
     this.broadcastRoster(room)
+    if (room.game === 'hanoi') this.maybeFinishHanoi(room)
     return { removed: true, code: room.code, playerId }
   }
 
@@ -994,6 +1265,7 @@ export class RoomManager {
           player.disconnectedAt != null &&
           nowMs - player.disconnectedAt > PLAYER_GRACE_MS
         ) {
+          this.recordHanoiDnf(room, pid, player.name)
           room.players.delete(pid)
           rosterChanged = true
           for (const [cid, entry] of this.playerRooms) {
@@ -1003,6 +1275,9 @@ export class RoomManager {
       }
       if (rosterChanged) {
         this.broadcastRoster(room)
+      }
+      if (room.game === 'hanoi' && room.phase === 'racing') {
+        this.maybeFinishHanoi(room)
       }
       if (nowMs - room.createdAt > MAX_IDLE_MS) {
         this.deleteRoom(room)

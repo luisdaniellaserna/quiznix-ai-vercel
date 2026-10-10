@@ -7,6 +7,7 @@ export type ReconnectPhase =
   | 'lobby'
   | 'starting'
   | 'question'
+  | 'racing'
   | 'finished'
   | 'closed'
 
@@ -27,7 +28,11 @@ export type SendDecision = 'send' | 'queue-redial' | 'queue' | 'close'
 /** Phases in which a dropped socket must redial instead of giving up. */
 export function isRecoverablePhase(phase: ReconnectPhase): boolean {
   return (
-    phase === 'connecting' || phase === 'lobby' || phase === 'starting' || phase === 'question'
+    phase === 'connecting' ||
+    phase === 'lobby' ||
+    phase === 'starting' ||
+    phase === 'question' ||
+    phase === 'racing'
   )
 }
 

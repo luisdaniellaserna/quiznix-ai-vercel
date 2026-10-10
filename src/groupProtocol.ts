@@ -1,3 +1,5 @@
+import type { Move } from '../shared/hanoiRules.mjs'
+
 export type HostStatus =
   | 'choosing-topic'
   | 'generating'
@@ -55,8 +57,40 @@ export interface ScoreboardEntry {
   correct: number
 }
 
+export type HanoiStatus = 'finished' | 'dnf' | 'pending'
+
+/** One seat in a Tower of Hanoi race's live or final standings. */
+export interface HanoiStandingEntry {
+  playerId: string
+  name: string
+  status: HanoiStatus
+  rank: number
+  finishedAt: number
+  /** server-measured time from the race start; 0 until finished */
+  elapsedMs: number
+  moves: number
+  hintsUsed: number
+}
+
+/** This seat's own recorded result in a race, if it has one. */
+export interface HanoiResult {
+  status: 'finished' | 'dnf'
+  finishedAt: number
+  moves: number
+  hintsUsed: number
+  name: string
+}
+
+/** Race payload carried by state-sync so a reconnecting racer hydrates at once. */
+export interface HanoiSnapshot {
+  disks: number
+  startedAt: number
+  standings: HanoiStandingEntry[]
+  myResult: HanoiResult | null
+}
+
 export type GroupServerMessage =
-  | { type: 'room-created'; code: string; hostSecret?: string }
+  | { type: 'room-created'; code: string; hostSecret?: string; game?: 'hanoi'; disks?: number }
   | {
       type: 'joined'
       playerId: string
@@ -68,12 +102,14 @@ export type GroupServerMessage =
       hostDetail?: string
       resumeSecret?: string
       resumeTtlMs?: number
+      game?: 'hanoi'
+      disks?: number
     }
   | {
       type: 'state-sync'
       playerId: string | null
       roomCode: string
-      phase: 'lobby' | 'starting' | 'question' | 'finished'
+      phase: 'lobby' | 'starting' | 'question' | 'racing' | 'finished'
       players: PlayerInfo[]
       quizReady: boolean
       hostStatus: HostStatus
@@ -90,6 +126,8 @@ export type GroupServerMessage =
       resumeTtlMs?: number
       hostSecret?: string
       serverNow: number
+      game?: 'hanoi'
+      hanoi?: HanoiSnapshot
     }
   | { type: 'pong'; serverNow: number }
   | { type: 'host-disconnected'; expiresAt: number }
@@ -121,7 +159,17 @@ export type GroupServerMessage =
   | { type: 'answer-progress'; answeredCount: number; totalPlayers: number }
   | { type: 'all-answered'; correctAnswer: string; scoreboard: ScoreboardEntry[] }
   | { type: 'game-finished'; leaderboard: LeaderboardEntry[] }
-  | { type: 'room-to-lobby'; players: PlayerInfo[]; topic: string; quizReady: boolean }
+  | { type: 'hanoi-started'; game: 'hanoi'; disks: number; startedAt: number }
+  | { type: 'hanoi-standings'; standings: HanoiStandingEntry[] }
+  | { type: 'hanoi-finished'; standings: HanoiStandingEntry[] }
+  | {
+      type: 'room-to-lobby'
+      players: PlayerInfo[]
+      topic: string
+      quizReady: boolean
+      game?: 'hanoi'
+      disks?: number
+    }
   | ({ type: 'chat-received' } & ChatMessage)
   | { type: 'game-closed' }
   | { type: 'host-left' }
@@ -135,6 +183,7 @@ export type GroupClientMessage =
       maxPlayers: number
       questions: QuestionFormat[]
     }
+  | { type: 'create-room'; game: 'hanoi'; disks: number; maxPlayers: number }
   | { type: 'join'; code: string; name: string }
   | { type: 'rejoin'; code: string; playerId: string; name: string; secret?: string }
   | { type: 'rejoinHost'; code: string; secret?: string }
@@ -157,4 +206,8 @@ export type GroupClientMessage =
       maxPlayers: number
       questions: QuestionFormat[]
     }
+  | { type: 'hanoi-finish'; moves: Move[]; hintsUsed: number }
+  | { type: 'hanoi-resign' }
+  | { type: 'end-hanoi' }
+  | { type: 'update-hanoi'; disks: number; maxPlayers: number }
   | { type: 'close-room' }

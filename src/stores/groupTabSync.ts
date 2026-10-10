@@ -1,26 +1,34 @@
 /**
- * Cross-tab coordination for the group quiz room — exactly one tab per browser
- * may hold an active room session at a time. Without this guard, opening a new
- * tab (or following a join link) silently shadows the previous tab's session
- * because the join/create flows rewrite the room store state on every call.
+ * Cross-tab coordination for group rooms — exactly one tab per browser may
+ * hold an active room session per game at a time. Without this guard, opening
+ * a new tab (or following a join link) silently shadows the previous tab's
+ * session because the join/create flows rewrite the room store state on every
+ * call. Game rooms are namespaced, so a browser may hold one quiz room and one
+ * Hanoi race at the same time, but never two rooms of the same game.
  *
  * Approach:
  *  - Each tab writes a per-tab id into sessionStorage (already per-tab, no
  *    coordination needed).
- *  - The active session is mirrored to localStorage with the tabId, so other
- *    tabs can detect it via the storage event.
- *  - A heartbeat refreshes `lastSeen` so a crashed tab's stale entry is
- *    recognized as dead after ~30s instead of blocking forever.
+ *  - Each game's active session is mirrored to localStorage with the tabId, so
+ *    other tabs can detect it via the storage event.
+ *  - A per-game heartbeat refreshes `lastSeen` so a crashed tab's stale entry
+ *    is recognized as dead after ~30s instead of blocking forever.
  *  - When forcing a takeover, the requesting tab writes a one-shot "evict"
  *    hint with the victim's tabId. The victim's `storage` listener drops its
  *    session and surfaces a toast.
  */
 
 const TAB_ID_KEY = 'quiznix-tab-id'
-const ACTIVE_SESSION_KEY = 'quiznix-active-group'
 const TAB_EVICT_PREFIX = 'quiznix-tab-evict:'
 const HEARTBEAT_MS = 5_000
 const STALE_MS = 30_000
+
+/** Games that hold a cross-tab room session. Quiz keeps its original key. */
+export type RoomGame = 'quiz' | 'hanoi'
+
+export function activeSessionKey(game: RoomGame = 'quiz'): string {
+  return game === 'quiz' ? 'quiznix-active-group' : `quiznix-active-group:${game}`
+}
 
 export interface ActiveGroupSession {
   tabId: string
@@ -75,9 +83,9 @@ function ensureTabId(): string {
 
 export const tabId = ensureTabId()
 
-export function getActiveSession(): ActiveGroupSession | null {
+export function getActiveSession(game: RoomGame = 'quiz'): ActiveGroupSession | null {
   try {
-    const raw = localStorage.getItem(ACTIVE_SESSION_KEY)
+    const raw = localStorage.getItem(activeSessionKey(game))
     if (!raw) return null
     const parsed = JSON.parse(raw) as ActiveGroupSession
     if (!parsed.tabId || !parsed.code || !parsed.role) return null
@@ -88,8 +96,10 @@ export function getActiveSession(): ActiveGroupSession | null {
 }
 
 /** Returns the live blocking session (a different tab holding an active room), or null. */
-export function getBlockingSession(): (ActiveGroupSession & { ageMs: number }) | null {
-  const s = getActiveSession()
+export function getBlockingSession(
+  game: RoomGame = 'quiz',
+): (ActiveGroupSession & { ageMs: number }) | null {
+  const s = getActiveSession(game)
   if (!s) return null
   if (s.tabId === tabId) return null
   const ageMs = Date.now() - s.lastSeen
@@ -97,55 +107,70 @@ export function getBlockingSession(): (ActiveGroupSession & { ageMs: number }) |
   return { ...s, ageMs }
 }
 
-let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+const heartbeatTimers = new Map<RoomGame, ReturnType<typeof setInterval>>()
+// games this tab currently holds a session for, so a tab close can release them all
+const claimedGames = new Set<RoomGame>()
 
-export function claimActiveSession(session: Omit<ActiveGroupSession, 'tabId' | 'lastSeen'>) {
+export function claimActiveSession(
+  session: Omit<ActiveGroupSession, 'tabId' | 'lastSeen'>,
+  game: RoomGame = 'quiz',
+) {
   try {
     const payload: ActiveGroupSession = {
       ...session,
       tabId,
       lastSeen: Date.now(),
     }
-    localStorage.setItem(ACTIVE_SESSION_KEY, JSON.stringify(payload))
+    localStorage.setItem(activeSessionKey(game), JSON.stringify(payload))
   } catch {
     /* localStorage unavailable — best-effort */
   }
-  if (!heartbeatTimer && typeof window !== 'undefined') {
-    heartbeatTimer = setInterval(refreshHeartbeat, HEARTBEAT_MS)
+  claimedGames.add(game)
+  if (!heartbeatTimers.has(game) && typeof window !== 'undefined') {
+    heartbeatTimers.set(
+      game,
+      setInterval(() => refreshHeartbeat(game), HEARTBEAT_MS),
+    )
   }
 }
 
-export function refreshHeartbeat() {
-  const s = getActiveSession()
+export function refreshHeartbeat(game: RoomGame = 'quiz') {
+  const s = getActiveSession(game)
   if (!s || s.tabId !== tabId) {
-    if (heartbeatTimer) {
-      clearInterval(heartbeatTimer)
-      heartbeatTimer = null
+    const timer = heartbeatTimers.get(game)
+    if (timer) {
+      clearInterval(timer)
+      heartbeatTimers.delete(game)
     }
     return
   }
   try {
-    localStorage.setItem(
-      ACTIVE_SESSION_KEY,
-      JSON.stringify({ ...s, lastSeen: Date.now() }),
-    )
+    localStorage.setItem(activeSessionKey(game), JSON.stringify({ ...s, lastSeen: Date.now() }))
   } catch {
     /* ignore */
   }
 }
 
-export function releaseActiveSession() {
-  const s = getActiveSession()
+export function releaseActiveSession(game: RoomGame = 'quiz') {
+  const s = getActiveSession(game)
   if (s && s.tabId === tabId) {
     try {
-      localStorage.removeItem(ACTIVE_SESSION_KEY)
+      localStorage.removeItem(activeSessionKey(game))
     } catch {
       /* ignore */
     }
   }
-  if (heartbeatTimer) {
-    clearInterval(heartbeatTimer)
-    heartbeatTimer = null
+  claimedGames.delete(game)
+  const timer = heartbeatTimers.get(game)
+  if (timer) {
+    clearInterval(timer)
+    heartbeatTimers.delete(game)
+  }
+}
+
+function releaseAllActiveSessions() {
+  for (const game of Array.from(claimedGames)) {
+    releaseActiveSession(game)
   }
 }
 
@@ -181,7 +206,5 @@ export function onEvicted(handler: () => void) {
 
 /** Run cleanup on tab close (best-effort — crashes won't fire this). */
 if (typeof window !== 'undefined') {
-  window.addEventListener('beforeunload', () => {
-    releaseActiveSession()
-  })
+  window.addEventListener('beforeunload', releaseAllActiveSessions)
 }

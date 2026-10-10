@@ -1,13 +1,21 @@
 <script setup lang="ts">
 import { onUnmounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import HanoiScreen from './HanoiScreen.vue'
 import HanoiResultScreen from './HanoiResultScreen.vue'
 import HanoiSetupScreen from './HanoiSetupScreen.vue'
+import HanoiRaceScreen from './HanoiRaceScreen.vue'
 import { loadBests, recordSolve, saveBests, type HanoiBest } from './bests'
-import { clearQuitAction, setQuitAction } from '../../shell/chrome'
+import {
+  clearGameContext,
+  clearQuitAction,
+  setGameContext,
+  setQuitAction,
+} from '../../shell/chrome'
+import { useHanoiRaceStore } from '../../stores/hanoiRaceStore'
 
-type Phase = 'setup' | 'playing' | 'result'
+type SoloPhase = 'setup' | 'playing' | 'result'
+type ViewMode = 'solo' | 'race'
 
 interface Outcome {
   moves: number
@@ -18,18 +26,24 @@ interface Outcome {
   hadPreviousBest: boolean
 }
 
+const route = useRoute()
 const router = useRouter()
-const phase = ref<Phase>('setup')
+const store = useHanoiRaceStore()
+
+const view = ref<ViewMode>('solo')
+const soloPhase = ref<SoloPhase>('setup')
 const disks = ref(4)
 const run = ref(0)
 const outcome = ref<Outcome | null>(null)
+// A join link opens the setup screen with the race tab and code prefilled.
+const initialCode = ref('')
+const initialMode = ref<ViewMode>('solo')
 
 function start(payload: { disks: number }) {
   disks.value = payload.disks
-  // a fresh board and clock per run, so "play again" really resets
   run.value += 1
   outcome.value = null
-  phase.value = 'playing'
+  soloPhase.value = 'playing'
 }
 
 function solved(result: { moves: number; ms: number; hintsUsed: number }) {
@@ -41,49 +55,115 @@ function solved(result: { moves: number; ms: number; hintsUsed: number }) {
     isNewBest,
   } = recordSolve(bests, disks.value, result.moves, result.ms)
   if (isNewBest) saveBests(updated)
-  outcome.value = { ...result, best, isNewBest, hadPreviousBest }
-  phase.value = 'result'
+  outcome.value = {
+    moves: result.moves,
+    ms: result.ms,
+    hintsUsed: result.hintsUsed,
+    best,
+    isNewBest,
+    hadPreviousBest,
+  }
+  soloPhase.value = 'result'
 }
 
 function backToSetup() {
   outcome.value = null
-  phase.value = 'setup'
+  soloPhase.value = 'setup'
 }
 
 function home() {
   void router.push('/')
 }
 
-// quitting mid-solve returns to the size picker, so the header's quit only
-// exists while there is a solve to abandon
+function hostRace(payload: { disks: number; maxPlayers: number; name: string }) {
+  view.value = 'race'
+  store.createRoom(payload)
+}
+
+function joinRace(payload: { code: string; name: string }) {
+  view.value = 'race'
+  store.joinRoom(payload.code, payload.name)
+}
+
+function leaveRace() {
+  store.leave()
+  view.value = 'solo'
+  soloPhase.value = 'setup'
+  initialCode.value = ''
+  initialMode.value = 'solo'
+}
+
+// A room in the URL is a join link: resume a live race if this browser holds
+// one, otherwise open the setup screen prefilled to join.
+function enterFromUrl() {
+  const room =
+    String(route.query.room ?? '')
+      .toUpperCase()
+      .slice(0, 6) || undefined
+  if (!room) return
+  if (store.autoResume(room)) {
+    view.value = 'race'
+  } else {
+    initialCode.value = room
+    initialMode.value = 'race'
+  }
+}
+enterFromUrl()
+watch(() => route.query.room, enterFromUrl)
+
+// The header's quit action only makes sense while there is something to leave.
 watch(
-  phase,
-  (value) => {
-    if (value === 'playing') setQuitAction('Quit puzzle', backToSetup)
-    else clearQuitAction()
+  [view, soloPhase, () => store.phase],
+  () => {
+    if (view.value === 'race' && store.phase !== 'idle' && store.phase !== 'closed') {
+      setQuitAction('Leave race', leaveRace)
+      setGameContext(store.isHost ? 'Host' : 'Player')
+    } else if (view.value === 'solo' && soloPhase.value === 'playing') {
+      setQuitAction('Quit puzzle', backToSetup)
+      clearGameContext()
+    } else {
+      clearQuitAction()
+      clearGameContext()
+    }
   },
   { immediate: true },
 )
 
-onUnmounted(clearQuitAction)
+onUnmounted(() => {
+  clearQuitAction()
+  clearGameContext()
+  if (view.value === 'race') store.leave()
+})
 </script>
 
 <template>
-  <HanoiSetupScreen v-if="phase === 'setup'" @start="start" />
+  <HanoiRaceScreen v-if="view === 'race'" @leave="leaveRace" />
 
-  <HanoiScreen v-else-if="phase === 'playing'" :key="run" :disks="disks" @solved="solved" />
+  <template v-else>
+    <HanoiSetupScreen
+      v-if="soloPhase === 'setup'"
+      :key="`${initialCode}:${initialMode}`"
+      :initial-code="initialCode"
+      :initial-mode="initialMode"
+      @start="start"
+      @host="hostRace"
+      @join="joinRace"
+    />
 
-  <HanoiResultScreen
-    v-else-if="phase === 'result' && outcome"
-    :disks="disks"
-    :moves="outcome.moves"
-    :ms="outcome.ms"
-    :hints-used="outcome.hintsUsed"
-    :best="outcome.best"
-    :is-new-best="outcome.isNewBest"
-    :had-previous-best="outcome.hadPreviousBest"
-    @replay="start"
-    @change-size="backToSetup"
-    @home="home"
-  />
+    <HanoiScreen v-else-if="soloPhase === 'playing'" :key="run" :disks="disks" @solved="solved" />
+
+    <HanoiResultScreen
+      v-else-if="soloPhase === 'result' && outcome"
+      :disks="disks"
+      :moves="outcome.moves"
+      :ms="outcome.ms"
+      :hints-used="outcome.hintsUsed"
+      :best="outcome.best"
+      :is-new-best="outcome.isNewBest"
+      :had-previous-best="outcome.hadPreviousBest"
+      @replay="start"
+      @change-size="backToSetup"
+      @home="home"
+    />
+  </template>
 </template>

@@ -121,10 +121,12 @@ function handleMessage(ws, raw) {
       case 'create-room': {
         const priorCode = manager.hostRooms.get(clientId)
         const { code } = manager.createRoom(clientId, {
+          game: message.game,
           topic: message.topic,
           timerSeconds: message.timerSeconds,
           maxPlayers: message.maxPlayers,
           questions: message.questions,
+          disks: message.disks,
         })
         // the manager closed and deleted the prior room; drop its layer entry
         if (priorCode && priorCode !== code) {
@@ -245,6 +247,18 @@ function handleMessage(ws, raw) {
         break
       case 'next-question':
         manager.nextQuestion(clientId)
+        break
+      case 'hanoi-finish':
+        manager.finishHanoi(clientId, { moves: message.moves, hintsUsed: message.hintsUsed })
+        break
+      case 'hanoi-resign':
+        manager.resignHanoi(clientId)
+        break
+      case 'end-hanoi':
+        manager.endHanoiRace(clientId)
+        break
+      case 'update-hanoi':
+        manager.updateHanoi(clientId, { disks: message.disks, maxPlayers: message.maxPlayers })
         break
       case 'back-to-lobby':
         manager.backToLobby(clientId)
@@ -368,15 +382,18 @@ wss.on('connection', (ws) => {
     if (!info) {
       return
     }
-    if (info.role === 'host') {
+    const code = info.code
+    // A Hanoi creator holds host authority AND a player seat on the same
+    // socket, so close must release whichever roles this client still has.
+    if (manager.hostRooms.has(clientId)) {
       manager.hostDisconnected(clientId)
-      const entry = roomClients.get(info.code)
+      const entry = roomClients.get(code)
       if (entry) entry.hostClientId = null
-      clientInfo.delete(clientId)
-      console.log(`[room ${info.code}] host disconnected — grace 3 min`)
-    } else {
+      console.log(`[room ${code}] host disconnected — grace 3 min`)
+    }
+    if (manager.playerRooms.has(clientId)) {
       manager.playerDisconnected(clientId)
-      const entry = roomClients.get(info.code)
+      const entry = roomClients.get(code)
       if (entry) {
         for (const [pid, cid] of entry.players) {
           if (cid === clientId) {
@@ -384,11 +401,10 @@ wss.on('connection', (ws) => {
             break
           }
         }
-        // keep entry for 5 min grace; rejoin will restore
       }
-      clientInfo.delete(clientId)
-      console.log(`[room ${info.code}] player ${info.playerId} disconnected — grace 5 min`)
+      console.log(`[room ${code}] player disconnected — grace 5 min`)
     }
+    clientInfo.delete(clientId)
   })
 })
 

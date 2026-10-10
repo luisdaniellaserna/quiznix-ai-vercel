@@ -31,11 +31,13 @@ import { diskLiftShadow, diskShadow, diskSurface, diskWidthPercent } from './vis
 const props = defineProps<{ disks: number }>()
 
 const emit = defineEmits<{
-  solved: [result: { moves: number; ms: number; hintsUsed: number }]
+  solved: [result: { moves: number; ms: number; hintsUsed: number; moveLog: Move[] }]
 }>()
 
 const board = ref<Board>(createBoard(props.disks))
 const moves = ref(0)
+/** Every committed move, in order — the race server replays this to validate. */
+const moveLog = ref<Move[]>([])
 const hintsUsed = ref(0)
 const hint = ref<Move | null>(null)
 const shakePeg = ref<number | null>(null)
@@ -207,6 +209,7 @@ function commit(move: Move, { narrate = false }: { narrate?: boolean } = {}) {
   const disk = topDisk(board.value, move.from)
   board.value = applyMove(board.value, move.from, move.to)
   moves.value += 1
+  moveLog.value.push({ from: move.from, to: move.to })
   hint.value = null
   held.value = null
   hoverPeg.value = null
@@ -221,7 +224,12 @@ function commit(move: Move, { narrate = false }: { narrate?: boolean } = {}) {
     : ''
   if (isSolved(board.value, props.disks)) {
     solved.value = true
-    emit('solved', { moves: moves.value, ms: stop(), hintsUsed: hintsUsed.value })
+    emit('solved', {
+      moves: moves.value,
+      ms: stop(),
+      hintsUsed: hintsUsed.value,
+      moveLog: moveLog.value,
+    })
   }
 }
 
@@ -473,6 +481,7 @@ function restart() {
   held.value = null
   cursorPeg.value = 0
   moves.value = 0
+  moveLog.value = []
   hintsUsed.value = 0
   hint.value = null
   error.value = ''

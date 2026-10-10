@@ -35,10 +35,10 @@ export const GAMES: GameDefinition[] = [
   {
     id: 'hanoi',
     name: 'Tower of Hanoi',
-    tagline: 'Stack every disk and chase your best solve.',
+    tagline: 'Stack every disk and chase your best solve — solo or in a live race.',
     icon: 'lucide:layers',
     path: '/hanoi',
-    modes: ['solo'],
+    modes: ['solo', 'group'],
     load: () => import('./hanoi/HanoiFlow.vue'),
   },
 ]

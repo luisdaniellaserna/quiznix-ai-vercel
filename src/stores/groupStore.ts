@@ -613,7 +613,8 @@ export const useGroupStore = defineStore('group', () => {
           leaderboard.value = null
         }
         error.value = ''
-        phase.value = message.phase
+        // the shared protocol adds the race phase; a quiz room is never racing
+        phase.value = message.phase === 'racing' ? 'lobby' : message.phase
         roomExpired.value = false
         loadChat(message.roomCode)
         persistSession()
