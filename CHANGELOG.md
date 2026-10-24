@@ -46,15 +46,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejoin), with a `game` dimension and a race state machine. The cross-tab "one
   room per browser" guard is now per game, so a quiz room and a race can live in
   separate tabs at once.
+- A third game: Sudoku at `/sudoku`, playable solo on a 4×4 beginner board or a
+  9×9 classic one (easy/medium/hard). Puzzles are generated on the spot and only
+  kept when exactly one solution remains, so every board is solvable by logic.
+- Sudoku assists: pencil marks in a 3×3 grid per cell that prune themselves
+  around a placed digit, conflict highlighting, and three hints per puzzle.
+- Sudoku digits can be dragged from the pad onto a cell, with the target cell
+  previewing the value until the pointer is released; tapping the pad still fills
+  the selected cell, so both inputs work at the same time.
+- Sudoku bests per board and difficulty (fastest time, fewer hints breaks a tie)
+  in `localStorage`, plus the last board choice remembered between visits.
+- Vitest coverage for the Sudoku rules, puzzle generator (determinism, clue
+  counts, unique solutions) and bests.
 
 ### Changed
 
-- The app is branded **Mind Gym** as the umbrella for its games; the quiz keeps
-  the Quiznix AI name on its own card and screen. `localStorage` keys are
-  unchanged (`quiznix-*`), so themes, setups and records carry over.
+- The app is branded **MINDaura**, with the supplied lockup in the header and the
+  supplied icon as the favicon and touch icon. The quiz keeps the Quiznix AI name
+  on its own card and screen. `localStorage` keys are unchanged (`quiznix-*`), so
+  themes, setups and records carry over.
+- A new default theme, `arcade`: a near-black canvas with cyan/violet/pink accents,
+  flat hard-edged surfaces, and a Silkscreen display face over Inter body copy. All
+  36 daisyUI presets remain in the switcher, and the brand chrome adapts to them:
+  the supplied logo is drawn for a light surface, so its plate is keyed out of the
+  asset and, on dark canvases, its lightness is inverted with the hue held; light
+  themes show the original inks. The choice follows the canvas colour, not a
+  hard-coded theme list.
 - `App.vue` is now a thin shell (header + router view + the cross-tab room guard).
   The quiz's flow, and the Tower of Hanoi's, each own their phases in
   `src/games/<game>/`, so the shell no longer grows with every game.
+- The podium nav no longer lists individual games: it links the landing sections
+  only (`Games`, `How it works`), so the header does not change as games are added.
+- `formatDuration` and `useStopwatch` moved out of the Hanoi folder to
+  `src/games/shared/` and `src/composables/`, so both solo puzzles share one copy.
 - Group rooms use the single shell header: the host/player role shows as a badge
   beside the brand, and "Exit quiz" now appears in the shared settings menu
   instead of a second per-screen header.

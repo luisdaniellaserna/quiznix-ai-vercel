@@ -1,19 +1,21 @@
-# Mind Gym
+# MINDaura
 
 A small collection of mind games behind one dashboard. The first is **Quiznix AI**,
 an AI-powered quiz generator: type any topic — or several — and get a quiz
 generated on demand, then play it solo at your own pace or live against friends in
 a realtime group room. The second is the **Tower of Hanoi**: a classic puzzle with
-a stopwatch and personal bests.
+a stopwatch and personal bests. The third is **Sudoku**: a freshly generated board
+with pencil marks, hints and a best time per setting.
 
 Built with Vue 3, Vite, Tailwind CSS 4, daisyUI 5, and TypeScript.
 
 ## Games
 
-| Game           | Route    | Modes            | Notes                                                                     |
-| -------------- | -------- | ---------------- | ------------------------------------------------------------------------- |
-| Quiznix AI     | `/quiz`  | Solo, live group | Questions generated per request from one or more topics. Needs an AI key. |
-| Tower of Hanoi | `/hanoi` | Solo, race    | 3–8 disks, move counter, hint, personal bests. Race needs 2+ players. |
+| Game           | Route     | Modes            | Notes                                                                     |
+| -------------- | --------- | ---------------- | ------------------------------------------------------------------------- |
+| Quiznix AI     | `/quiz`   | Solo, live group | Questions generated per request from one or more topics. Needs an AI key. |
+| Tower of Hanoi | `/hanoi`  | Solo, race       | 3–8 disks, move counter, hint, personal bests. Race needs 2+ players.     |
+| Sudoku         | `/sudoku` | Solo             | 4×4 and 9×9, easy/medium/hard, pencil marks, three hints, best times.     |
 
 ### Adding a game
 
@@ -59,6 +61,26 @@ only a legal, genuinely solved board counts as a finish, and the finish time is
 the server's, not the client's. It runs on the same room server as the quiz
 (port 8787).
 
+### Sudoku
+
+- Two boards: a 4×4 beginner grid and the classic 9×9, the latter in easy,
+  medium or hard. Every puzzle is generated on the spot with exactly one
+  solution, so it can always be finished by logic alone.
+- Pick a cell and use the number pad, or the keyboard: arrows move the selection,
+  `1`–`9` fills, `Backspace` erases, `N` toggles pencil marks and `H` takes a
+  hint. Three hints per puzzle.
+- A digit can also be dragged from the pad straight onto a cell: while it is held
+  the target cell previews it, and the digit only lands when you let go. Tapping
+  the pad still fills the selected cell, so both ways of playing work at once.
+- Pencil marks live in a 3×3 grid inside the cell and are pruned from the peers of
+  a digit you place, the way a solver would erase them.
+- Conflicts are flagged as you go; a cell that repeats a digit in its row, column
+  or box turns red without giving the answer away.
+- The clock starts on your first entry and only measures the solve. Your record
+  per board and difficulty is the fastest time, with fewer hints breaking a tie.
+- Bests live in `localStorage` (`quiznix-sudoku-bests`), the picker is remembered
+  under `quiznix-sudoku-setup`, and nothing is sent to a server.
+
 ## Features
 
 - **AI question generation** — quizzes are generated per request from one or
@@ -70,11 +92,17 @@ the server's, not the client's. It runs on the same room server as the quiz
   same time; a live leaderboard ranks answers by correctness _and_ speed.
 - **Tower of Hanoi** — a solo puzzle game alongside the quiz: 3–8 disks,
   optimal-move hints, and personal bests per stack size.
-- **Settings menu** — 35 daisyUI themes with instant switching, an in-app help
-  guide, and a bug report that drafts an email to the developer.
+- **Sudoku** — generated puzzles with a proven unique solution, 4×4 and 9×9
+  boards (easy/medium/hard), self-pruning pencil marks, three hints per round,
+  and a best time per board and difficulty.
+- **Settings menu** — 36 daisyUI themes with instant switching, an in-app help
+  guide, and a bug report that drafts an email to the developer. The default
+  `arcade` theme is the app's own dark canvas.
 - **Theme-adaptive UI** — everything derives from daisyUI theme tokens
   (base-100, primary, …), so the interface stays consistent across light, dark,
-  and all other themes.
+  and all other themes. The pixel display face and the panel/typography
+  vocabulary in `src/styles/pixel.css` are theme-agnostic; only the neon accents
+  are scoped to the `arcade` theme.
 
 ## Tech stack
 
@@ -99,8 +127,8 @@ Browser (Vue 3 SPA)
 The frontend is a single-page app behind a router: the dashboard lists the games
 and each game is a lazily-loaded route that owns its own screens. Group mode adds a
 small in-memory room server (`server/`) that brokers realtime game state between the
-host and players over WebSocket. The Tower of Hanoi runs entirely in the browser
-— no server round-trips and no AI involved.
+host and players over WebSocket. The Tower of Hanoi and Sudoku run entirely in the
+browser — no server round-trips and no AI involved.
 
 ```
 src/
@@ -108,19 +136,26 @@ src/
   main.ts                    # app + pinia + router
   router/index.ts            # routes; games are lazy chunks
   shell/
-    AppHeader.vue            # brand, role badge, settings menu with the game's quit action
+    AppHeader.vue            # brand, centered nav, settings menu with the game's quit action
+    BrandLogo.vue            # the supplied lockup; inked for dark or light canvases
+    ArcadeBackdrop.vue       # the shared starfield canvas behind every route
+    StatCard.vue             # the hero's stat strip
+    RidgeDivider.vue         # the layered ridge at the hero's fold
     chrome.ts                # how a game flow registers its quit action and role
     RoomGuard.vue            # "another tab took over" notice, visible on any route
     SettingsMenu.vue         # themes, help, report, quit
     ConfettiBurst.vue        # shared completion effect
   dashboard/DashboardView.vue# the landing: cards built from the game registry
+  styles/pixel.css           # brand utilities: panels, pixel type, textures
   games/
     registry.ts              # GAMES: the single manifest of playable games
     hanoi/                   # Flow, SetupScreen, board, results, rules helpers, tests
+    sudoku/                  # Flow, SetupScreen, board, results, generator, rules, bests, tests
     quiz/                    # QuizFlow, QuizSetupScreen (+ the quiz's modules for now)
+    shared/                  # formatDuration, shared by the solo puzzle games
   components/                # quiz screens/panels still living at the top level
   stores/groupStore.ts       # Pinia store: room lifecycle + WebSocket client
-  composables/               # useCountdown, useUselessFact (quiz-facing)
+  composables/               # useCountdown, useUselessFact (quiz), useStopwatch (puzzles)
 shared/
   hanoiRules.mjs             # canonical Hanoi rules (plain ESM: Vite bundles it,
                              # the room server can import it with Node)
@@ -130,6 +165,10 @@ server/
   roomManager.test.mjs       # node:test suite for room logic
 scripts/
   free-port.mjs              # kills a stale process on a port (predev:all)
+public/
+  mindaura-logo.png          # the supplied lockup, cropped to its content box with
+                             # the flat plate keyed out, so the header shows through
+  mindaura.ico, .png         # favicon / touch icon
 ```
 
 ## Getting started
@@ -251,8 +290,9 @@ npm run test          # client logic suite (vitest)
 ```
 
 Client-side logic (quiz generation and dedupe in `src/quizGeneration.test.ts`, the
-Tower of Hanoi rules and personal bests in `src/games/hanoi/*.test.ts`) runs under
-Vitest:
+Tower of Hanoi rules and personal bests in `src/games/hanoi/*.test.ts`, and the
+Sudoku rules, puzzle generator and bests in `src/games/sudoku/*.test.ts`) runs
+under Vitest:
 
 ```sh
 npm run test
