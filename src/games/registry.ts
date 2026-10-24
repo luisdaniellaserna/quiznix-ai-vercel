@@ -9,7 +9,7 @@ export type GameMode = 'solo' | 'group'
  */
 export interface GameDefinition {
   id: string
-  /** Shown on the card and in the header. */
+  /** Shown on the dashboard card. */
   name: string
   tagline: string
   /** Card art: an Iconify (lucide) name, rendered inside a tinted badge. */
@@ -40,6 +40,15 @@ export const GAMES: GameDefinition[] = [
     path: '/hanoi',
     modes: ['solo', 'group'],
     load: () => import('./hanoi/HanoiFlow.vue'),
+  },
+  {
+    id: 'sudoku',
+    name: 'Sudoku',
+    tagline: 'One grid, one solution — fill every row, column and box.',
+    icon: 'lucide:grid-3x3',
+    path: '/sudoku',
+    modes: ['solo'],
+    load: () => import('./sudoku/SudokuFlow.vue'),
   },
 ]
 
