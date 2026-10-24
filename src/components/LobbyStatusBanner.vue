@@ -69,7 +69,7 @@ const label = computed(() => {
   </div>
   <div
     v-else
-    class="flex items-center justify-center gap-2 rounded-xl border border-base-300 bg-base-100 px-4 py-2"
+    class="border-base-300 bg-base-100 flex items-center justify-center gap-2 rounded-lg border px-4 py-2"
   >
     <Icon icon="lucide:clock" class="h-4 w-4 shrink-0 opacity-60" aria-hidden="true" />
     <span class="text-sm font-medium opacity-60">{{ label }}</span>

@@ -37,13 +37,13 @@ function dismiss() {
 
 <template>
   <dialog ref="evictedDialogRef" class="modal">
-    <div class="modal-box">
-      <h3 class="text-lg font-bold">Switched rooms</h3>
+    <div class="modal-box border border-base-300 bg-base-200">
+      <h3 class="pixel-title text-lg">Switched rooms</h3>
       <p class="py-3 text-sm opacity-80">
         {{ groupStore.evictedMessage || 'Another tab took over this session.' }}
       </p>
       <div class="modal-action">
-        <button class="btn btn-soft btn-primary" @click="dismiss">Back to games</button>
+        <button class="btn btn-primary" @click="dismiss">Back to games</button>
       </div>
     </div>
     <form method="dialog" class="modal-backdrop">

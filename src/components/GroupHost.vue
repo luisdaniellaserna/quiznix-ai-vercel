@@ -230,54 +230,53 @@ function playAgain() {
 </script>
 
 <template>
-  <div class="min-h-screen overflow-x-hidden bg-base-100 text-base-content">
-
-    <main class="mx-auto w-full max-w-6xl p-4">
+  <div class="flex-1 text-base-content">
+    <main class="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
       <div
         v-if="(store.phase === 'lobby' || store.phase === 'question') && !hasWakeLock"
         class="alert alert-warning mb-4 text-sm"
       >
         <span
-          >Keep this tab visible — some phones disconnect when the screen locks. Use Settings
-          → Exit quiz only to end.</span
+          >Keep this tab visible — some phones disconnect when the screen locks. Use Settings → Exit
+          quiz only to end.</span
         >
       </div>
       <!-- closed by the host or a lost connection -->
-      <div v-if="store.phase === 'closed'" class="card mt-4 shadow-xl">
+      <div v-if="store.phase === 'closed'" class="panel mt-4">
         <div class="card-body items-center text-center">
-          <h2 class="text-xl font-bold">{{ store.closedMessage }}</h2>
-          <button class="btn btn-soft btn-primary" @click="emit('leave')">Back to home</button>
+          <h2 class="pixel-title text-xl">{{ store.closedMessage }}</h2>
+          <button class="btn btn-primary" @click="emit('leave')">Back to home</button>
         </div>
       </div>
 
       <!-- creating room — replaces the brief idle flash before the server replies -->
-      <div v-else-if="store.phase === 'connecting'" class="card mt-4 shadow-xl">
+      <div v-else-if="store.phase === 'connecting'" class="panel mt-4">
         <div class="card-body items-center gap-3 text-center">
           <span class="loading loading-spinner loading-lg text-primary"></span>
-          <h2 class="text-lg font-bold">Creating room…</h2>
+          <h2 class="pixel-title text-lg">Creating room…</h2>
           <p class="text-sm opacity-70">Contacting the room server.</p>
         </div>
       </div>
 
       <!-- room creation failed (e.g. server unreachable) -->
-      <div v-else-if="store.phase === 'idle'" class="card mt-4 shadow-xl">
+      <div v-else-if="store.phase === 'idle'" class="panel mt-4">
         <div class="card-body items-center text-center">
-          <h2 class="text-xl font-bold">Could not create the room</h2>
+          <h2 class="pixel-title text-xl">Could not create the room</h2>
           <p v-if="store.error" class="text-sm opacity-70">{{ store.error }}</p>
-          <button class="btn btn-soft btn-primary" @click="emit('leave')">Back to home</button>
+          <button class="btn btn-primary" @click="emit('leave')">Back to home</button>
         </div>
       </div>
 
       <!-- final leaderboard -->
-      <div v-else-if="store.phase === 'finished'" class="card mt-4 shadow-xl">
+      <div v-else-if="store.phase === 'finished'" class="panel mt-4">
         <ConfettiBurst />
         <div class="card-body">
-          <h2 class="text-center text-2xl font-black">🏆 Final scores</h2>
+          <h2 class="pixel-title text-center text-2xl">Final scores</h2>
           <p class="text-center font-medium opacity-70">{{ store.topic }}</p>
           <FinalLeaderboard :entries="store.leaderboard ?? []" />
           <div class="card-actions mt-4 flex-wrap">
-            <button class="btn btn-soft btn-primary flex-1" @click="playAgain">Play again</button>
-            <button class="btn btn-soft btn-error" @click="finish">End exam</button>
+            <button class="btn btn-primary flex-1" @click="playAgain">Play again</button>
+            <button class="btn btn-outline btn-error" @click="finish">End exam</button>
           </div>
         </div>
       </div>
@@ -286,22 +285,20 @@ function playAgain() {
       <div v-else-if="store.phase === 'lobby'" class="mt-4 space-y-4">
         <ConnectionBanner />
         <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
-          <div class="card shadow-xl">
+          <div class="panel">
             <div class="card-body gap-0 p-0">
-              <section
-                class="flex flex-col gap-6 p-6 text-left md:flex-row md:items-stretch"
-              >
+              <section class="flex flex-col gap-6 p-6 text-left md:flex-row md:items-stretch">
                 <div class="flex min-w-0 flex-1 flex-col gap-3">
                   <span class="text-sm font-bold uppercase leading-none tracking-wider opacity-70"
                     >Room code</span
                   >
                   <div
-                    class="break-all text-4xl font-black leading-none tracking-[0.2em] sm:text-5xl sm:tracking-[0.3em]"
+                    class="pixel-number break-all text-3xl leading-none tracking-[0.2em] sm:text-4xl sm:tracking-[0.3em]"
                   >
                     {{ store.roomCode }}
                   </div>
                   <div class="mt-2 flex flex-wrap items-center gap-2">
-                    <button class="btn btn-soft btn-sm shrink-0" @click="copyLink">
+                    <button class="btn btn-ghost btn-sm shrink-0" @click="copyLink">
                       <Icon
                         :icon="copied ? 'lucide:check' : 'lucide:copy'"
                         class="h-4 w-4 shrink-0"
@@ -309,7 +306,7 @@ function playAgain() {
                       />
                       {{ copied ? 'Copied!' : 'Copy join link' }}
                     </button>
-                    <button class="btn btn-soft btn-sm shrink-0" @click="openQr">
+                    <button class="btn btn-ghost btn-sm shrink-0" @click="openQr">
                       <Icon icon="lucide:qr-code" class="h-4 w-4 shrink-0" aria-hidden="true" />
                       Show QR code
                     </button>
@@ -320,9 +317,7 @@ function playAgain() {
                   <h3 class="text-sm font-bold uppercase tracking-wider opacity-70">
                     Ready to start
                   </h3>
-                  <p v-if="store.players.length === 0" class="text-sm opacity-70">
-                    No players yet
-                  </p>
+                  <p v-if="store.players.length === 0" class="text-sm opacity-70">No players yet</p>
                   <p v-else class="text-sm opacity-70">
                     {{ store.readyCount }} of {{ store.players.length }} players ready
                   </p>
@@ -346,12 +341,8 @@ function playAgain() {
                       />
                       Start game
                     </button>
-                    <button class="btn btn-soft w-full" @click="emit('edit-setup')">
-                      <Icon
-                        icon="carbon:settings"
-                        class="h-4 w-4 shrink-0"
-                        aria-hidden="true"
-                      />
+                    <button class="btn btn-ghost w-full" @click="emit('edit-setup')">
+                      <Icon icon="carbon:settings" class="h-4 w-4 shrink-0" aria-hidden="true" />
                       Game Settings
                     </button>
                   </div>
@@ -394,13 +385,13 @@ function playAgain() {
       <div v-else-if="store.phase === 'starting'" class="mt-4 space-y-4">
         <ConnectionBanner />
         <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
-          <div class="card shadow-xl">
+          <div class="panel">
             <div class="card-body items-center gap-4 text-center">
               <p class="text-sm opacity-70">Game starting — countdown is live for players.</p>
               <div class="w-full text-left">
                 <LobbyChat />
               </div>
-              <button class="btn btn-soft" @click="store.cancelStart()">Cancel start</button>
+              <button class="btn btn-ghost" @click="store.cancelStart()">Cancel start</button>
             </div>
           </div>
           <aside class="w-full lg:sticky lg:top-4">
@@ -425,7 +416,7 @@ function playAgain() {
       </div>
 
       <!-- live question -->
-      <div v-else-if="store.phase === 'question'" class="card mt-4 shadow-xl">
+      <div v-else-if="store.phase === 'question'" class="panel mt-4">
         <div class="card-body gap-4">
           <div class="flex items-center justify-between">
             <span class="font-bold">Question {{ store.currentIndex + 1 }} / {{ store.total }}</span>
@@ -454,7 +445,7 @@ function playAgain() {
               :class="optionBarClass(option)"
             >
               <span class="min-w-0 break-words text-left">{{ option }}</span>
-              <span class="shrink-0 font-black">{{ optionCount(option) }}</span>
+              <span class="pixel-number shrink-0">{{ optionCount(option) }}</span>
             </div>
           </div>
 
@@ -476,11 +467,7 @@ function playAgain() {
 
           <div class="flex items-center justify-between gap-2">
             <span v-if="!canAdvance" class="text-sm opacity-60">Waiting for answers…</span>
-            <button
-              class="btn btn-soft btn-primary ml-auto"
-              :disabled="!canAdvance"
-              @click="next"
-            >
+            <button class="btn btn-primary ml-auto" :disabled="!canAdvance" @click="next">
               {{ isLastQuestion ? 'See results' : 'Next question' }}
             </button>
           </div>
@@ -490,15 +477,15 @@ function playAgain() {
 
     <!-- host exit verification -->
     <dialog ref="exitDialogRef" class="modal">
-      <div class="modal-box">
-        <h3 class="text-lg font-bold">Exit quiz?</h3>
+      <div class="modal-box border border-base-300 bg-base-200">
+        <h3 class="pixel-title text-lg">Exit quiz?</h3>
         <p class="py-4 text-sm opacity-80">
           This will end the quiz for everyone. Players will see “Quiz has ended by the host”. Are
           you sure you want to exit?
         </p>
         <div class="modal-action">
-          <button class="btn btn-soft" @click="exitDialogRef?.close()">Cancel</button>
-          <button class="btn btn-soft btn-error" @click="confirmExit">Exit quiz</button>
+          <button class="btn btn-ghost" @click="exitDialogRef?.close()">Cancel</button>
+          <button class="btn btn-outline btn-error" @click="confirmExit">Exit quiz</button>
         </div>
       </div>
       <form method="dialog" class="modal-backdrop">
@@ -508,14 +495,14 @@ function playAgain() {
 
     <!-- kick verification -->
     <dialog ref="kickDialogRef" class="modal">
-      <div class="modal-box">
-        <h3 class="text-lg font-bold">Kick {{ kickTarget?.name }}?</h3>
+      <div class="modal-box border border-base-300 bg-base-200">
+        <h3 class="pixel-title text-lg">Kick {{ kickTarget?.name }}?</h3>
         <p class="py-4 text-sm opacity-80">
           They will be removed from the lobby and need the room code to rejoin. Continue?
         </p>
         <div class="modal-action">
-          <button class="btn btn-soft" @click="cancelKick">Cancel</button>
-          <button class="btn btn-soft btn-error" @click="confirmKick">Kick player</button>
+          <button class="btn btn-ghost" @click="cancelKick">Cancel</button>
+          <button class="btn btn-outline btn-error" @click="confirmKick">Kick player</button>
         </div>
       </div>
       <form method="dialog" class="modal-backdrop">
@@ -525,8 +512,8 @@ function playAgain() {
 
     <!-- join QR code -->
     <dialog ref="qrDialogRef" class="modal">
-      <div class="modal-box items-center text-center">
-        <h3 class="text-lg font-bold">Scan to join</h3>
+      <div class="modal-box items-center border border-base-300 bg-base-200 text-center">
+        <h3 class="pixel-title text-lg">Scan to join</h3>
         <p class="py-2 text-sm opacity-70">
           Room <strong class="tracking-[0.2em]">{{ store.roomCode }}</strong>
         </p>
@@ -541,8 +528,8 @@ function playAgain() {
         />
         <p class="mt-2 truncate px-4 text-xs opacity-60">{{ joinUrl }}</p>
         <div class="modal-action justify-center">
-          <button class="btn btn-soft" @click="qrDialogRef?.close()">Close</button>
-          <button class="btn btn-soft" @click="copyLink">
+          <button class="btn btn-ghost" @click="qrDialogRef?.close()">Close</button>
+          <button class="btn btn-ghost" @click="copyLink">
             {{ copied ? 'Copied!' : 'Copy join link' }}
           </button>
         </div>

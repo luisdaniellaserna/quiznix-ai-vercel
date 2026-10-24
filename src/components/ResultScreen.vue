@@ -23,17 +23,17 @@ const deservesConfetti = computed(() => props.total > 0 && percentage.value >= 5
 </script>
 
 <template>
-  <div class="mx-auto mt-6 w-full max-w-2xl space-y-4 p-4 sm:p-0">
+  <div class="app-container mt-6 w-full max-w-2xl space-y-4 py-10 sm:mx-auto">
     <ConfettiBurst
       v-if="deservesConfetti"
       :particle-count="isPerfectScore ? 180 : 90"
       :duration-ms="isPerfectScore ? 3200 : 2200"
     />
 
-    <div class="stats stats-vertical sm:stats-horizontal shadow w-full bg-base-200">
+    <div class="stats stats-vertical border-base-300 w-full border sm:stats-horizontal">
       <div class="stat">
-        <div class="stat-title">Score</div>
-        <div class="stat-value text-primary">{{ score }} / {{ total }}</div>
+        <div class="stat-title font-mono text-[10px] tracking-[0.2em] uppercase">Score</div>
+        <div class="stat-value pixel-number text-primary">{{ score }} / {{ total }}</div>
         <div class="stat-desc">{{ percentage }}% correct</div>
       </div>
     </div>
@@ -41,13 +41,15 @@ const deservesConfetti = computed(() => props.total > 0 && percentage.value >= 5
     <div
       v-for="(userAnswer, index) in userAnswers"
       :key="index"
-      class="card bg-base-100 shadow border-l-4"
+      class="panel border-l-4"
       :class="
-        userAnswer.answer === userAnswer.question.correct_answer ? 'border-success' : 'border-error'
+        userAnswer.answer === userAnswer.question.correct_answer
+          ? 'border-l-success'
+          : 'border-l-error'
       "
     >
       <div class="card-body py-4">
-        <h3 class="break-words font-semibold">{{ userAnswer.question.question }}</h3>
+        <h3 class="font-semibold break-words">{{ userAnswer.question.question }}</h3>
         <p>
           <span class="opacity-70">Your answer: </span>
           <span
@@ -76,8 +78,6 @@ const deservesConfetti = computed(() => props.total > 0 && percentage.value >= 5
       </div>
     </div>
 
-    <button class="btn btn-soft btn-primary w-full sm:w-auto btn-lg" @click="emit('reset')">
-      Reset
-    </button>
+    <button class="btn btn-primary btn-lg w-full sm:w-auto" @click="emit('reset')">Reset</button>
   </div>
 </template>

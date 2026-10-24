@@ -15,7 +15,7 @@ const readyCount = computed(() => props.players.filter((p) => p.ready).length)
 </script>
 
 <template>
-  <div class="card bg-base-200/60 shadow-xl">
+  <div class="panel">
     <div class="card-body gap-3 p-4">
       <div class="flex items-center justify-between gap-2">
         <h3 class="text-sm font-bold uppercase tracking-wider opacity-70">
@@ -30,7 +30,7 @@ const readyCount = computed(() => props.players.filter((p) => p.ready).length)
       </div>
       <div
         v-if="players.length === 0"
-        class="flex flex-col items-center gap-1 rounded-xl border border-dashed border-base-300 px-4 py-6 text-center"
+        class="flex flex-col items-center gap-1 rounded-lg border border-dashed border-base-300 px-4 py-6 text-center"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -55,11 +55,11 @@ const readyCount = computed(() => props.players.filter((p) => p.ready).length)
         <li
           v-for="p in players"
           :key="p.playerId"
-          class="flex items-center justify-between gap-2 rounded-xl border border-base-300 bg-base-100 px-3 py-2"
+          class="flex items-center justify-between gap-2 rounded-lg border border-base-300 bg-base-100 px-3 py-2"
         >
           <div class="flex min-w-0 items-center gap-2">
             <span class="truncate font-semibold">
-              👤 {{ p.name }}
+              {{ p.name }}
               <span v-if="selfId && p.playerId === selfId" class="badge badge-primary badge-xs ml-1"
                 >you</span
               >
@@ -72,7 +72,7 @@ const readyCount = computed(() => props.players.filter((p) => p.ready).length)
             </span>
             <button
               v-if="isHost && p.playerId !== selfId"
-              class="btn btn-soft btn-error btn-xs"
+              class="btn btn-outline btn-error btn-xs"
               :aria-label="`Kick ${p.name}`"
               @click="emit('kick', p.playerId)"
             >

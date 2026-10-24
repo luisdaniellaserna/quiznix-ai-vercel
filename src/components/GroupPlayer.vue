@@ -318,22 +318,21 @@ function confirmLeave() {
 </script>
 
 <template>
-  <div class="min-h-screen overflow-x-hidden bg-base-100 text-base-content">
-
-    <main class="mx-auto w-full max-w-6xl p-4">
+  <div class="flex-1 text-base-content">
+    <main class="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
       <!-- closed by the host or a lost connection — also shown as modal -->
-      <div v-if="store.phase === 'closed'" class="card mt-4 shadow-xl">
+      <div v-if="store.phase === 'closed'" class="panel mt-4">
         <div class="card-body items-center text-center">
           <h2 class="text-xl font-bold">{{ store.closedMessage }}</h2>
-          <button class="btn btn-soft btn-primary" @click="done">Back to home</button>
+          <button class="btn btn-primary" @click="done">Back to home</button>
         </div>
       </div>
 
       <!-- joining — prevents flash of the join form/host code after tapping Join -->
-      <div v-else-if="store.phase === 'connecting'" class="card mt-4 shadow-xl">
+      <div v-else-if="store.phase === 'connecting'" class="panel mt-4">
         <div class="card-body items-center gap-3 text-center">
           <span class="loading loading-spinner loading-lg text-primary"></span>
-          <h2 class="text-lg font-bold">Joining room…</h2>
+          <h2 class="pixel-title text-lg">Joining room…</h2>
           <p class="text-sm opacity-70">
             Connecting as {{ store.playerName || playerName || 'player' }} — please wait.
           </p>
@@ -341,26 +340,26 @@ function confirmLeave() {
       </div>
 
       <!-- final leaderboard -->
-      <div v-else-if="store.phase === 'finished'" class="card mt-4 shadow-xl">
+      <div v-else-if="store.phase === 'finished'" class="panel mt-4">
         <ConfettiBurst v-if="isWinner" />
         <div class="card-body">
-          <h2 class="text-center text-2xl font-black">🏆 Final scores</h2>
+          <h2 class="pixel-title text-center text-2xl">Final scores</h2>
           <p class="text-center font-medium opacity-70">{{ store.topic }}</p>
           <FinalLeaderboard :entries="store.leaderboard ?? []" :highlight-name="store.playerName" />
           <div class="mt-4 grid gap-2">
-            <button class="btn btn-soft w-full" @click="store.returnToLobby()">
+            <button class="btn btn-ghost w-full" @click="store.returnToLobby()">
               Back to lobby
             </button>
-            <button class="btn btn-soft btn-primary w-full" @click="done">Done</button>
+            <button class="btn btn-primary w-full" @click="done">Done</button>
           </div>
         </div>
       </div>
 
       <!-- join form -->
-      <div v-else-if="store.phase === 'idle'" class="card mt-4 shadow-xl">
+      <div v-else-if="store.phase === 'idle'" class="panel mt-4">
         <div class="card-body gap-4">
           <div class="text-center">
-            <h2 class="text-2xl font-black">Join a live quiz</h2>
+            <h2 class="pixel-title text-2xl">Join a live quiz</h2>
             <p class="text-sm opacity-70">Enter the room code your host shared.</p>
           </div>
           <div v-if="resumeOffer && resumeOffer.role === 'player'" class="alert alert-info text-sm">
@@ -370,8 +369,8 @@ function confirmLeave() {
               >? Your seat may still be held.</span
             >
             <div class="flex gap-2">
-              <button class="btn btn-soft btn-primary btn-sm" @click="resume">Resume</button>
-              <button class="btn btn-soft btn-sm" @click="dismissResume">Dismiss</button>
+              <button class="btn btn-primary btn-sm" @click="resume">Resume</button>
+              <button class="btn btn-ghost btn-sm" @click="dismissResume">Dismiss</button>
             </div>
           </div>
           <div v-if="store.error" role="alert" class="alert alert-error">
@@ -384,7 +383,7 @@ function confirmLeave() {
               type="text"
               maxlength="6"
               placeholder="ABC123"
-              class="input input-bordered input-lg w-full rounded-xl text-center text-xl font-black tracking-[0.2em] uppercase focus:outline-none sm:text-2xl sm:tracking-[0.3em]"
+              class="input input-bordered input-lg pixel-number w-full text-center text-xl tracking-[0.2em] uppercase focus:outline-none sm:text-2xl sm:tracking-[0.3em]"
               @input="
                 (event) => (joinCode = (event.target as HTMLInputElement).value.toUpperCase())
               "
@@ -397,10 +396,10 @@ function confirmLeave() {
               type="text"
               maxlength="24"
               placeholder="e.g. Ana"
-              class="input input-bordered input-lg w-full rounded-xl focus:outline-none"
+              class="input input-bordered input-lg w-full focus:outline-none"
             />
           </label>
-          <button class="btn btn-soft btn-primary btn-lg" :disabled="!canJoin || joining" @click="join">
+          <button class="btn btn-primary btn-lg" :disabled="!canJoin || joining" @click="join">
             {{ joining ? 'Joining…' : 'Join game' }}
           </button>
         </div>
@@ -410,22 +409,20 @@ function confirmLeave() {
       <div v-else-if="store.phase === 'lobby'" class="mt-4 space-y-4">
         <ConnectionBanner />
         <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
-          <div class="card shadow-xl">
+          <div class="panel">
             <div class="card-body gap-0 p-0">
-              <section
-                class="flex flex-col gap-6 p-6 text-left md:flex-row md:items-stretch"
-              >
+              <section class="flex flex-col gap-6 p-6 text-left md:flex-row md:items-stretch">
                 <div class="flex min-w-0 flex-col gap-3 md:basis-2/5">
                   <span class="text-sm font-bold uppercase leading-none tracking-wider opacity-70"
                     >Room code</span
                   >
                   <div
-                    class="break-all text-3xl font-black leading-none tracking-[0.2em] sm:text-4xl"
+                    class="pixel-number break-all text-2xl leading-none tracking-[0.2em] sm:text-3xl"
                   >
                     {{ store.roomCode }}
                   </div>
                   <div class="mt-2 flex flex-col items-stretch gap-2">
-                    <button class="btn btn-soft btn-sm w-full" @click="copyLink">
+                    <button class="btn btn-ghost btn-sm w-full" @click="copyLink">
                       <Icon
                         :icon="copied ? 'lucide:check' : 'lucide:copy'"
                         class="h-4 w-4 shrink-0"
@@ -433,7 +430,7 @@ function confirmLeave() {
                       />
                       {{ copied ? 'Copied!' : 'Copy join link' }}
                     </button>
-                    <button class="btn btn-soft btn-sm w-full" @click="openQr">
+                    <button class="btn btn-ghost btn-sm w-full" @click="openQr">
                       <Icon icon="lucide:qr-code" class="h-4 w-4 shrink-0" aria-hidden="true" />
                       Show QR code
                     </button>
@@ -505,7 +502,7 @@ function confirmLeave() {
         v-else-if="store.phase === 'starting'"
         class="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start"
       >
-        <div class="card flex-1 shadow-xl">
+        <div class="panel flex-1">
           <div class="card-body items-center gap-4 text-center">
             <div class="w-full">
               <ConnectionBanner />
@@ -546,7 +543,7 @@ function confirmLeave() {
         v-else-if="store.phase === 'question'"
         class="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start"
       >
-        <div class="card flex-1 shadow-xl">
+        <div class="panel flex-1">
           <div class="card-body gap-4">
             <ConnectionBanner />
             <div class="flex items-center justify-between">
@@ -565,12 +562,12 @@ function confirmLeave() {
               :value="store.currentIndex + 1"
               :max="store.total"
             />
-            <h2 class="break-words text-xl font-bold sm:text-2xl">{{ store.question }}</h2>
+            <h2 class="break-words text-lg font-semibold sm:text-xl">{{ store.question }}</h2>
             <div class="grid gap-3">
               <button
                 v-for="option in shuffledOptions"
                 :key="option"
-                class="btn btn-soft btn-lg h-auto min-h-12 justify-start whitespace-normal break-words py-3 text-left rounded-xl"
+                class="btn btn-outline border-base-300 btn-lg h-auto min-h-12 justify-start font-normal whitespace-normal break-words py-3 text-left hover:border-primary hover:bg-base-200"
                 :class="{
                   'btn-success': isRevealed && option === store.correctAnswer,
                   'btn-error':
@@ -589,7 +586,7 @@ function confirmLeave() {
               </button>
             </div>
             <button
-              class="btn btn-soft btn-primary btn-lg w-full"
+              class="btn btn-primary btn-lg w-full"
               :disabled="!selectedOption || hasSubmitted || countdown.expired.value"
               @click="submitAnswer"
             >
@@ -644,10 +641,10 @@ function confirmLeave() {
 
         <!-- live progress sidebar -->
         <aside class="flex w-full flex-col gap-3 lg:sticky lg:top-4 lg:w-64 lg:shrink-0">
-          <div class="card shadow-xl">
+          <div class="panel">
             <div class="card-body gap-1 p-4">
               <p class="text-xs font-semibold uppercase tracking-wider opacity-60">Answered</p>
-              <p class="text-2xl font-black">
+              <p class="pixel-title text-2xl">
                 {{ answeredDisplay }}<span class="opacity-50">/{{ totalDisplay }}</span>
               </p>
               <progress
@@ -667,10 +664,10 @@ function confirmLeave() {
             </div>
           </div>
 
-          <div class="card shadow-xl">
+          <div class="panel">
             <div class="card-body gap-1 p-4">
               <p class="text-xs font-semibold uppercase tracking-wider opacity-60">Current rank</p>
-              <p class="text-2xl font-black">
+              <p class="pixel-title text-2xl">
                 <template v-if="store.myRank > 0">
                   <span class="text-primary">{{ rankLabel }}</span
                   ><span class="opacity-50">/{{ totalRoster }}</span>
@@ -693,8 +690,8 @@ function confirmLeave() {
 
     <!-- join QR code -->
     <dialog ref="qrDialogRef" class="modal">
-      <div class="modal-box items-center text-center">
-        <h3 class="text-lg font-bold">Scan to join</h3>
+      <div class="modal-box items-center border border-base-300 bg-base-200 text-center">
+        <h3 class="pixel-title text-lg">Scan to join</h3>
         <p class="py-2 text-sm opacity-70">
           Room <strong class="tracking-[0.2em]">{{ store.roomCode }}</strong>
         </p>
@@ -702,15 +699,15 @@ function confirmLeave() {
           v-if="joinUrl"
           :src="qrSrc"
           alt="QR code with the link to join this room"
-          class="mx-auto h-55 w-55 rounded-xl border border-base-300 bg-white p-2"
+          class="mx-auto h-55 w-55 border border-base-300 bg-white p-2"
           loading="lazy"
           width="220"
           height="220"
         />
         <p class="mt-2 truncate px-4 text-xs opacity-60">{{ joinUrl }}</p>
         <div class="modal-action justify-center">
-          <button class="btn btn-soft" @click="qrDialogRef?.close()">Close</button>
-          <button class="btn btn-soft" @click="copyLink">
+          <button class="btn btn-ghost" @click="qrDialogRef?.close()">Close</button>
+          <button class="btn btn-ghost" @click="copyLink">
             {{ copied ? 'Copied!' : 'Copy join link' }}
           </button>
         </div>
@@ -722,15 +719,15 @@ function confirmLeave() {
 
     <!-- leave-lobby verification -->
     <dialog ref="exitDialogRef" class="modal">
-      <div class="modal-box">
-        <h3 class="text-lg font-bold">Leave the lobby?</h3>
+      <div class="modal-box border border-base-300 bg-base-200">
+        <h3 class="pixel-title text-lg">Leave the lobby?</h3>
         <p class="py-4 text-sm opacity-80">
           You'll leave Room {{ store.roomCode || 'PENDING' }} and need the room code to rejoin. Are
           you sure you want to exit the lobby?
         </p>
         <div class="modal-action">
-          <button class="btn btn-soft" @click="exitDialogRef?.close()">Stay</button>
-          <button class="btn btn-soft btn-error" @click="confirmLeave">Leave lobby</button>
+          <button class="btn btn-ghost" @click="exitDialogRef?.close()">Stay</button>
+          <button class="btn btn-ghost btn-error" @click="confirmLeave">Leave lobby</button>
         </div>
       </div>
       <form method="dialog" class="modal-backdrop">
@@ -740,13 +737,13 @@ function confirmLeave() {
 
     <!-- host-ended modal -->
     <dialog ref="closedDialogRef" class="modal">
-      <div class="modal-box text-center">
-        <h3 class="text-lg font-bold">Quiz has ended by the host</h3>
+      <div class="modal-box border border-base-300 bg-base-200 text-center">
+        <h3 class="pixel-title text-lg">Quiz has ended by the host</h3>
         <p class="py-4 text-sm opacity-80">
           {{ store.closedMessage || 'The host ended the quiz.' }}
         </p>
         <div class="modal-action justify-center">
-          <button class="btn btn-soft btn-primary" @click="done">Back to home</button>
+          <button class="btn btn-primary" @click="done">Back to home</button>
         </div>
       </div>
       <form method="dialog" class="modal-backdrop">

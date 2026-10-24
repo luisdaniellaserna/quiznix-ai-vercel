@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { Icon } from '@iconify/vue'
 import { MAX_DISKS, MIN_DISKS, optimalMoves } from '../../../shared/hanoiRules.mjs'
-import { formatDuration } from './format'
+import { formatDuration } from '../shared/format'
 import { loadBests } from './bests'
 
 type PlayMode = 'solo' | 'race'
@@ -93,10 +93,11 @@ function join() {
 </script>
 
 <template>
-  <section class="mx-auto w-full max-w-2xl">
-    <div class="rounded-2xl bg-base-100 p-6 shadow-xl sm:p-8">
-      <h1 class="text-2xl font-black tracking-tight">Tower of Hanoi</h1>
-      <p class="mt-2 text-sm opacity-70">
+  <section class="app-container w-full max-w-2xl py-10 sm:py-14">
+    <div class="panel p-6 sm:p-8">
+      <p class="eyebrow">Solo puzzle</p>
+      <h1 class="pixel-title mt-3 text-2xl">Tower of Hanoi</h1>
+      <p class="mt-3 text-sm opacity-70">
         Move the whole stack to the far right peg. A larger disk never sits on a smaller one. The
         clock runs while you solve — it measures you, it never stops you.
       </p>
@@ -105,32 +106,34 @@ function join() {
         <button
           type="button"
           class="btn flex-1"
-          :class="mode === 'solo' ? 'btn-primary' : 'btn-soft'"
+          :class="mode === 'solo' ? 'btn-primary' : 'btn-outline border-base-300'"
           :aria-pressed="mode === 'solo'"
           @click="mode = 'solo'"
         >
-          <Icon icon="lucide:user" class="h-4 w-4" />
+          <Icon icon="lucide:user" class="h-4 w-4" aria-hidden="true" />
           Solo
         </button>
         <button
           type="button"
           class="btn flex-1"
-          :class="mode === 'race' ? 'btn-primary' : 'btn-soft'"
+          :class="mode === 'race' ? 'btn-primary' : 'btn-outline border-base-300'"
           :aria-pressed="mode === 'race'"
           @click="mode = 'race'"
         >
-          <Icon icon="lucide:swords" class="h-4 w-4" />
+          <Icon icon="lucide:swords" class="h-4 w-4" aria-hidden="true" />
           Race
         </button>
       </div>
 
-      <p class="mt-4 text-sm font-semibold">How many disks?</p>
+      <p class="mt-7 font-mono text-[11px] tracking-[0.18em] uppercase opacity-70">
+        How many disks?
+      </p>
       <div class="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-6">
         <button
           v-for="size in diskOptions"
           :key="size"
           type="button"
-          class="cursor-pointer rounded-xl border-2 px-2 py-3 text-center transition"
+          class="cursor-pointer rounded-lg border px-2 py-3 text-center transition duration-200 focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none motion-reduce:transition-none"
           :class="
             size === disks
               ? 'border-primary bg-primary/10'
@@ -139,15 +142,15 @@ function join() {
           :aria-pressed="size === disks"
           @click="disks = size"
         >
-          <span class="block text-xl font-black">{{ size }}</span>
-          <span class="block text-[10px] font-medium opacity-60">
+          <span class="pixel-number block text-xl">{{ size }}</span>
+          <span class="mt-1 block font-mono text-[9px] tracking-[0.1em] uppercase opacity-55">
             {{ optimalMoves(size) }} moves
           </span>
         </button>
       </div>
 
       <template v-if="mode === 'solo'">
-        <div class="mt-5 rounded-xl border border-base-300 bg-base-200/50 p-4 text-sm">
+        <div class="panel-quiet mt-5 p-4 text-sm">
           <p class="font-semibold">Perfect solve: {{ optimalMoves(disks) }} moves</p>
           <p class="mt-1 opacity-70">
             <template v-if="best">
@@ -160,9 +163,9 @@ function join() {
           </p>
         </div>
 
-        <div class="mt-6 flex flex-col items-stretch gap-2 sm:flex-row">
-          <button class="btn btn-soft btn-primary flex-1" @click="start">
-            <Icon icon="lucide:play" class="h-4 w-4" />
+        <div class="mt-7 flex flex-col items-stretch gap-2 sm:flex-row">
+          <button class="btn btn-primary flex-1 sm:flex-none sm:px-8" @click="start">
+            <Icon icon="lucide:play" class="h-4 w-4" aria-hidden="true" />
             Start puzzle
           </button>
           <RouterLink to="/" class="btn btn-ghost flex-1 sm:flex-none">← All games</RouterLink>
@@ -170,7 +173,7 @@ function join() {
       </template>
 
       <template v-else>
-        <div class="mt-5 rounded-xl border border-base-300 bg-base-200/50 p-4 text-sm">
+        <div class="panel-quiet mt-5 p-4 text-sm">
           <p class="font-semibold">Race rules</p>
           <ul class="mt-1 list-inside list-disc space-y-0.5 opacity-70">
             <li>Everyone solves the same {{ disks }}-disk puzzle at once.</li>
@@ -203,9 +206,9 @@ function join() {
           </option>
         </select>
 
-        <div class="mt-6 flex flex-col items-stretch gap-2 sm:flex-row">
-          <button class="btn btn-soft btn-primary flex-1" @click="host">
-            <Icon icon="lucide:swords" class="h-4 w-4" />
+        <div class="mt-7 flex flex-col items-stretch gap-2 sm:flex-row">
+          <button class="btn btn-primary flex-1 sm:flex-none sm:px-8" @click="host">
+            <Icon icon="lucide:swords" class="h-4 w-4" aria-hidden="true" />
             Host a race
           </button>
           <RouterLink to="/" class="btn btn-ghost flex-1 sm:flex-none">← All games</RouterLink>
@@ -234,7 +237,7 @@ function join() {
               autocomplete="off"
               aria-label="Your name"
             />
-            <button type="submit" class="btn btn-soft">Join</button>
+            <button type="submit" class="btn btn-outline border-base-300">Join</button>
           </div>
           <p v-if="formError" role="alert" class="text-sm text-error">{{ formError }}</p>
         </form>

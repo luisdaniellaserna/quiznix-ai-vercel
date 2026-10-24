@@ -5,7 +5,7 @@ import HanoiScreen from './HanoiScreen.vue'
 import LobbyRoster from '../../components/LobbyRoster.vue'
 import CountdownOverlay from '../../components/CountdownOverlay.vue'
 import { useHanoiRaceStore } from '../../stores/hanoiRaceStore'
-import { formatDuration } from './format'
+import { formatDuration } from '../shared/format'
 import type { Move } from '../../../shared/hanoiRules.mjs'
 
 const emit = defineEmits<{ leave: [] }>()

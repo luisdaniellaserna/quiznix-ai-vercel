@@ -1,12 +1,11 @@
 import { onUnmounted, ref } from 'vue'
 
 /**
- * Count-up stopwatch for the Tower of Hanoi solve timer.
+ * Count-up stopwatch for a solo puzzle solve.
  *
  * Deliberately not `useCountdown`: that one counts down to a deadline and the
  * quiz uses it to cut questions short. Here the clock never ends the game — it
- * just measures the solve, because time is the tie-break when two players used
- * the same number of moves.
+ * just measures the solve, because time is what a personal best is ranked by.
  *
  * The clock is idle until play actually starts (`startOnce`), so time spent
  * reading the screen or hunting for the controls is not counted against you.

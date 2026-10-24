@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import AppHeader from './shell/AppHeader.vue'
+import ArcadeBackdrop from './shell/ArcadeBackdrop.vue'
 import RoomGuard from './shell/RoomGuard.vue'
 </script>
 
 <template>
-  <div class="flex min-h-screen flex-col overflow-x-hidden bg-base-100 text-base-content">
+  <div class="relative flex min-h-screen flex-col overflow-x-hidden text-base-content">
+    <!-- one canvas for every route: the views no longer paint their own -->
+    <ArcadeBackdrop />
+
     <AppHeader />
 
     <!-- no shared max-width here: each view owns its container so the dashboard
          can paint a full-bleed background behind the whole page -->
-    <main class="flex flex-1 flex-col">
+    <main class="relative z-10 flex flex-1 flex-col">
       <RouterView />
     </main>
 

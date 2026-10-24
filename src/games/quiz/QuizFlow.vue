@@ -599,7 +599,7 @@ function cancelEditSetup() {
       :score="score"
       :total="userAnswers.length"
     />
-    <div v-else role="alert" class="alert alert-warning">
+    <div v-else role="alert" class="alert alert-warning mx-auto my-10 max-w-xl">
       No DeepSeek API key! Set <code>VITE_DEEPSEEK_API_KEY</code> in <code>.env</code>.
     </div>
   </template>
@@ -626,8 +626,8 @@ function cancelEditSetup() {
   <!-- cross-tab single-room guard: another live tab is already in a room. This
        one stays with the quiz because only the quiz ever claims a room. -->
   <dialog ref="takeoverDialogRef" class="modal">
-    <div class="modal-box">
-      <h3 class="text-lg font-bold">You already have an active room</h3>
+    <div class="modal-box border border-base-300 bg-base-200">
+      <h3 class="pixel-title text-lg">You already have an active room</h3>
       <p class="py-3 text-sm opacity-80">
         This browser is in
         <strong class="font-bold">Room {{ blockingSession?.code || 'PENDING' }}</strong>
@@ -645,10 +645,8 @@ function cancelEditSetup() {
         place.
       </p>
       <div class="modal-action">
-        <button class="btn btn-soft" @click="cancelTakeover">Stay in other room</button>
-        <button class="btn btn-soft btn-primary" @click="confirmTakeover">
-          Leave other &amp; continue
-        </button>
+        <button class="btn btn-ghost" @click="cancelTakeover">Stay in other room</button>
+        <button class="btn btn-primary" @click="confirmTakeover">Leave other &amp; continue</button>
       </div>
     </div>
     <form method="dialog" class="modal-backdrop">

@@ -1,4 +1,4 @@
-/** Clock formatting for the Tower of Hanoi timer: `m:ss.t`. */
+/** Clock formatting shared by the puzzle games: `m:ss.t`. */
 export function formatDuration(ms: number): string {
   const safe = Number.isFinite(ms) && ms > 0 ? ms : 0
   const totalTenths = Math.floor(safe / 100)

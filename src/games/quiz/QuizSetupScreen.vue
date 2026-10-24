@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { Icon } from '@iconify/vue'
 import { MODE_CONFIG, type GameMode, type Mode } from '../../quizConfig'
 import { prefetchUselessFact } from '../../composables/useUselessFact'
 import { useGroupStore } from '../../stores/groupStore'
@@ -303,52 +304,55 @@ function start() {
     <section
       v-if="step === 'mode'"
       id="setup"
-      class="relative z-10 mx-auto w-full max-w-3xl px-6 pb-24 pt-10"
+      class="mx-auto w-full max-w-3xl px-4 pt-10 pb-20 sm:pt-14"
     >
-      <div class="relative mx-auto mt-8 max-w-3xl sm:mt-16">
-        <div class="rounded-2xl bg-base-100 shadow-2xl">
-          <span
-            class="absolute -left-6 -top-6 hidden -rotate-12 text-4xl drop-shadow-xl sm:-left-10 sm:-top-8 sm:block sm:text-6xl"
-            >🎮</span
-          >
-          <span
-            class="absolute -right-6 bottom-4 hidden rotate-12 text-4xl drop-shadow-xl sm:-right-8 sm:bottom-6 sm:block sm:text-6xl"
-            >👥</span
-          >
-
-          <div class="border-b border-base-300 px-6 py-4">
-            <div
-              class="flex items-center justify-center gap-2 text-base font-semibold text-base-content"
+      <div class="relative mx-auto max-w-3xl">
+        <div class="panel overflow-hidden">
+          <div class="border-base-300 flex items-center justify-center gap-2.5 border-b px-6 py-4">
+            <Icon icon="lucide:gamepad-2" class="text-primary h-4 w-4" aria-hidden="true" />
+            <span class="font-mono text-[11px] tracking-[0.2em] uppercase opacity-80"
+              >How do you want to play?</span
             >
-              <span class="text-primary">▣</span> How do you want to play?
-            </div>
           </div>
 
-          <div class="grid gap-5 p-6 sm:p-10 sm:grid-cols-2">
+          <div class="grid gap-4 p-6 sm:grid-cols-2 sm:p-10">
             <button
-              class="group rounded-2xl border-2 border-base-300 p-6 text-left transition hover:border-primary hover:shadow-lg focus:outline-none"
+              class="panel-quiet hover:border-primary/60 group p-6 text-left transition duration-200 focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none motion-reduce:transition-none"
               @click="pickGameMode('solo')"
             >
-              <span class="text-4xl">👤</span>
-              <h3 class="mt-3 text-lg font-bold text-base-content">Solo</h3>
-              <p class="mt-1 text-sm text-base-content/70">
+              <span
+                class="border-base-300 bg-base-100 text-primary flex h-11 w-11 items-center justify-center rounded-[0.45rem] border"
+              >
+                <Icon icon="lucide:user-round" class="h-5 w-5" aria-hidden="true" />
+              </span>
+              <h3 class="mt-4 font-semibold">Solo</h3>
+              <p class="text-base-content/60 mt-1.5 text-sm leading-relaxed">
                 Practice on your own. Answer each question against the clock.
               </p>
             </button>
             <button
-              class="group rounded-2xl border-2 border-base-300 p-6 text-left transition hover:border-primary hover:shadow-lg focus:outline-none"
+              class="panel-quiet hover:border-primary/60 group p-6 text-left transition duration-200 focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none motion-reduce:transition-none"
               @click="pickGameMode('group')"
             >
-              <span class="text-4xl">👥</span>
-              <h3 class="mt-3 text-lg font-bold text-base-content">Group</h3>
-              <p class="mt-1 text-sm text-base-content/70">
+              <span
+                class="border-base-300 bg-base-100 text-secondary flex h-11 w-11 items-center justify-center rounded-[0.45rem] border"
+              >
+                <Icon icon="lucide:users-round" class="h-5 w-5" aria-hidden="true" />
+              </span>
+              <h3 class="mt-4 font-semibold">Group</h3>
+              <p class="text-base-content/60 mt-1.5 text-sm leading-relaxed">
                 Host a live quiz. Friends join from their gadgets with a room code.
               </p>
             </button>
           </div>
 
-          <div class="border-t border-base-300 px-6 py-4 text-center">
-            <button class="btn btn-soft btn-sm" @click="backToDashboard">← All games</button>
+          <div class="border-base-300 border-t px-6 py-4 text-center">
+            <button
+              class="btn btn-ghost btn-sm font-mono text-[10px] tracking-[0.16em] uppercase"
+              @click="backToDashboard"
+            >
+              ← All games
+            </button>
           </div>
         </div>
       </div>
@@ -358,25 +362,15 @@ function start() {
     <section
       v-else-if="step === 'groupChoice'"
       id="setup"
-      class="relative z-10 mx-auto w-full max-w-3xl px-6 pb-24 pt-10"
+      class="mx-auto w-full max-w-3xl px-4 pt-10 pb-20 sm:pt-14"
     >
-      <div class="relative mx-auto mt-8 max-w-3xl sm:mt-16">
-        <div class="rounded-2xl bg-base-100 shadow-2xl">
-          <span
-            class="absolute -left-6 -top-6 hidden -rotate-12 text-4xl drop-shadow-xl sm:-left-10 sm:-top-8 sm:block sm:text-6xl"
-            >👥</span
-          >
-          <span
-            class="absolute -right-6 bottom-4 hidden rotate-12 text-4xl drop-shadow-xl sm:-right-8 sm:bottom-6 sm:block sm:text-6xl"
-            >🔗</span
-          >
-
-          <div class="border-b border-base-300 px-6 py-4">
-            <div
-              class="flex items-center justify-center gap-2 text-base font-semibold text-base-content"
+      <div class="relative mx-auto max-w-3xl">
+        <div class="panel overflow-hidden">
+          <div class="border-base-300 flex items-center justify-center gap-2.5 border-b px-6 py-4">
+            <Icon icon="lucide:users" class="text-primary h-4 w-4" aria-hidden="true" />
+            <span class="font-mono text-[11px] tracking-[0.2em] uppercase opacity-80"
+              >Group — what do you want to do?</span
             >
-              <span class="text-primary">▣</span> Group — what do you want to do?
-            </div>
           </div>
 
           <div v-if="hostResumeOffer" class="px-6 pt-6 sm:px-10 sm:pt-8">
@@ -390,34 +384,47 @@ function start() {
                 <button class="btn btn-warning btn-sm" @click="dismissHostResume">Dismiss</button>
               </div>
             </div>
-            <p v-if="resumeError" role="alert" class="mt-2 text-sm text-error">{{ resumeError }}</p>
+            <p v-if="resumeError" role="alert" class="text-error mt-2 text-sm">{{ resumeError }}</p>
           </div>
 
-          <div class="grid gap-5 p-6 sm:p-10 sm:grid-cols-2">
+          <div class="grid gap-4 p-6 sm:grid-cols-2 sm:p-10">
             <button
-              class="group rounded-2xl border-2 border-base-300 p-6 text-left transition hover:border-primary hover:shadow-lg focus:outline-none"
+              class="panel-quiet hover:border-primary/60 group p-6 text-left transition duration-200 focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none motion-reduce:transition-none"
               @click="pickGroupAction('create')"
             >
-              <span class="text-4xl">🚀</span>
-              <h3 class="mt-3 text-lg font-bold text-base-content">Create room</h3>
-              <p class="mt-1 text-sm text-base-content/70">
+              <span
+                class="border-base-300 bg-base-100 text-primary flex h-11 w-11 items-center justify-center rounded-[0.45rem] border"
+              >
+                <Icon icon="lucide:rocket" class="h-5 w-5" aria-hidden="true" />
+              </span>
+              <h3 class="mt-4 font-semibold">Create room</h3>
+              <p class="text-base-content/60 mt-1.5 text-sm leading-relaxed">
                 Pick topics and host a live quiz. Share the 6-letter code.
               </p>
             </button>
             <button
-              class="group rounded-2xl border-2 border-base-300 p-6 text-left transition hover:border-primary hover:shadow-lg focus:outline-none"
+              class="panel-quiet hover:border-primary/60 group p-6 text-left transition duration-200 focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none motion-reduce:transition-none"
               @click="pickGroupAction('join')"
             >
-              <span class="text-4xl">🔑</span>
-              <h3 class="mt-3 text-lg font-bold text-base-content">Join room</h3>
-              <p class="mt-1 text-sm text-base-content/70">
+              <span
+                class="border-base-300 bg-base-100 text-secondary flex h-11 w-11 items-center justify-center rounded-[0.45rem] border"
+              >
+                <Icon icon="lucide:key-round" class="h-5 w-5" aria-hidden="true" />
+              </span>
+              <h3 class="mt-4 font-semibold">Join room</h3>
+              <p class="text-base-content/60 mt-1.5 text-sm leading-relaxed">
                 Have a code? Enter it and join from your gadget.
               </p>
             </button>
           </div>
 
-          <div class="border-t border-base-300 px-6 py-4 text-center">
-            <button class="btn btn-soft btn-sm" @click="backToMode">← Back</button>
+          <div class="border-base-300 border-t px-6 py-4 text-center">
+            <button
+              class="btn btn-ghost btn-sm font-mono text-[10px] tracking-[0.16em] uppercase"
+              @click="backToMode"
+            >
+              ← Back
+            </button>
           </div>
         </div>
       </div>
@@ -427,25 +434,15 @@ function start() {
     <section
       v-else-if="step === 'groupJoin'"
       id="setup"
-      class="relative z-10 mx-auto w-full max-w-3xl px-6 pb-24 pt-10"
+      class="mx-auto w-full max-w-3xl px-4 pt-10 pb-20 sm:pt-14"
     >
-      <div class="relative mx-auto mt-8 max-w-3xl sm:mt-16">
-        <div class="rounded-2xl bg-base-100 shadow-2xl">
-          <span
-            class="absolute -left-6 -top-6 hidden -rotate-12 text-4xl drop-shadow-xl sm:-left-10 sm:-top-8 sm:block sm:text-6xl"
-            >🔑</span
-          >
-          <span
-            class="absolute -right-6 bottom-4 hidden rotate-12 text-4xl drop-shadow-xl sm:-right-8 sm:bottom-6 sm:block sm:text-6xl"
-            >👋</span
-          >
-
-          <div class="border-b border-base-300 px-6 py-4">
-            <div
-              class="flex items-center justify-center gap-2 text-base font-semibold text-base-content"
+      <div class="relative mx-auto max-w-3xl">
+        <div class="panel overflow-hidden">
+          <div class="border-base-300 flex items-center justify-center gap-2.5 border-b px-6 py-4">
+            <Icon icon="lucide:door-open" class="text-primary h-4 w-4" aria-hidden="true" />
+            <span class="font-mono text-[11px] tracking-[0.2em] uppercase opacity-80"
+              >Join a live quiz</span
             >
-              <span class="text-primary">▣</span> Join a live quiz
-            </div>
           </div>
 
           <form class="grid gap-5 p-6 sm:p-10" @submit.prevent="submitJoinGroup">
@@ -459,7 +456,7 @@ function start() {
                 type="text"
                 maxlength="6"
                 placeholder="ABC123"
-                class="input input-bordered input-lg w-full rounded-xl text-center text-xl font-black tracking-[0.2em] uppercase focus:outline-none sm:text-2xl sm:tracking-[0.3em]"
+                class="input input-bordered input-lg pixel-number w-full text-center text-xl tracking-[0.2em] uppercase focus:outline-none sm:text-2xl sm:tracking-[0.3em]"
                 @input="(e) => (joinCode = (e.target as HTMLInputElement).value.toUpperCase())"
               />
             </label>
@@ -470,20 +467,23 @@ function start() {
                 type="text"
                 maxlength="24"
                 placeholder="e.g. Ana"
-                class="input input-bordered input-lg w-full rounded-xl focus:outline-none"
+                class="input input-bordered input-lg w-full focus:outline-none"
               />
             </label>
             <button
               type="submit"
-              class="btn btn-soft btn-primary mt-2 h-14 rounded-full text-lg font-semibold"
+              class="btn btn-primary mt-2 h-14 text-lg font-semibold"
               :disabled="!canJoinGroup"
             >
               Join room
             </button>
           </form>
 
-          <div class="border-t border-base-300 px-6 py-4 text-center">
-            <button class="btn btn-soft btn-sm" @click="backToGroupChoice">
+          <div class="border-base-300 border-t px-6 py-4 text-center">
+            <button
+              class="btn btn-ghost btn-sm font-mono text-[10px] tracking-[0.16em] uppercase"
+              @click="backToGroupChoice"
+            >
               ← Back to group options
             </button>
           </div>
@@ -495,26 +495,19 @@ function start() {
     <section
       v-else-if="step === 'form'"
       id="setup"
-      class="relative z-10 mx-auto w-full max-w-3xl px-6 pb-24 pt-10"
+      class="mx-auto w-full max-w-3xl px-4 pt-10 pb-20 sm:pt-14"
     >
-      <div class="relative mx-auto mt-8 max-w-3xl sm:mt-16">
-        <div class="rounded-2xl bg-base-100 shadow-2xl">
-          <span
-            class="absolute -left-6 -top-6 hidden -rotate-12 text-4xl drop-shadow-xl sm:-left-10 sm:-top-8 sm:block sm:text-6xl"
-            >📜</span
-          >
-          <span
-            class="absolute -right-6 bottom-4 hidden rotate-12 text-4xl drop-shadow-xl sm:-right-8 sm:bottom-6 sm:block sm:text-6xl"
-            >🧩</span
-          >
-
-          <!-- app top bar -->
-          <div class="border-b border-base-300 px-6 py-4">
-            <div
-              class="flex items-center justify-center gap-2 text-base font-semibold text-base-content"
+      <div class="relative mx-auto max-w-3xl">
+        <div class="panel overflow-hidden">
+          <div class="border-base-300 flex items-center justify-center gap-2.5 border-b px-6 py-4">
+            <Icon
+              icon="lucide:sliders-horizontal"
+              class="text-primary h-4 w-4"
+              aria-hidden="true"
+            />
+            <span class="font-mono text-[11px] tracking-[0.2em] uppercase opacity-80"
+              >Set up your {{ gameMode }} quiz</span
             >
-              <span class="text-primary">▣</span> Set up your {{ gameMode }} quiz
-            </div>
           </div>
 
           <div v-if="hostResumeOffer && gameMode === 'group'" class="px-6 pt-6 sm:px-10 sm:pt-8">
@@ -528,7 +521,7 @@ function start() {
                 <button class="btn btn-warning btn-sm" @click="dismissHostResume">Dismiss</button>
               </div>
             </div>
-            <p v-if="resumeError" role="alert" class="mt-2 text-sm text-error">{{ resumeError }}</p>
+            <p v-if="resumeError" role="alert" class="text-error mt-2 text-sm">{{ resumeError }}</p>
           </div>
 
           <!-- setup form -->
@@ -543,33 +536,33 @@ function start() {
             </div>
             <div>
               <label class="label text-base font-semibold text-base-content">Topic/s</label>
-              <div class="flex flex-col sm:flex-row gap-2">
+              <div class="flex flex-col gap-2 sm:flex-row">
                 <input
                   v-model="topic"
                   type="text"
                   placeholder="Enter a topic..."
-                  class="input input-bordered input-lg w-full rounded-xl focus:outline-none"
+                  class="input input-bordered input-lg w-full focus:outline-none"
                   @keyup.enter.prevent="addTopic"
                 />
                 <button
                   type="button"
-                  class="btn btn-soft btn-primary rounded-xl w-full sm:w-auto shrink-0"
+                  class="btn btn-outline border-base-300 w-full shrink-0 hover:border-primary hover:bg-base-200 sm:w-auto"
                   :disabled="topic.trim() === ''"
                   @click="addTopic"
                 >
                   Add
                 </button>
               </div>
-              <div v-if="allTopics.length > 0" class="mt-2 flex flex-wrap gap-2">
+              <div v-if="allTopics.length > 0" class="mt-3 flex flex-wrap gap-2">
                 <span
                   v-for="(item, index) in allTopics"
                   :key="item + index"
-                  class="badge badge-soft badge-primary gap-1 py-3"
+                  class="badge border-primary/35 bg-primary/10 text-primary gap-1.5 py-3 font-mono text-[11px]"
                 >
                   {{ item }}
                   <button
                     type="button"
-                    class="cursor-pointer text-base font-bold leading-none opacity-60 transition hover:text-error"
+                    class="hover:text-error cursor-pointer text-base leading-none font-bold opacity-60 transition"
                     :aria-label="`Remove ${item}`"
                     @click="removeTopic(index)"
                   >
@@ -578,11 +571,11 @@ function start() {
                 </span>
               </div>
             </div>
-            <div class="grid gap-5 grid-cols-1 sm:grid-cols-2">
+            <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
               <label class="text-base font-semibold text-base-content">
                 <span class="label">Difficulty</span>
                 <select
-                  class="select select-bordered select-lg w-full rounded-xl focus:outline-none"
+                  class="select select-bordered select-lg w-full focus:outline-none"
                   :value="mode"
                   @change="onModeChange"
                 >
@@ -597,11 +590,11 @@ function start() {
                   v-model.number="itemCount"
                   type="number"
                   min="1"
-                  class="input input-bordered input-lg w-full rounded-xl focus:outline-none"
+                  class="input input-bordered input-lg w-full focus:outline-none"
                 />
               </label>
             </div>
-            <div v-if="gameMode === 'group'" class="grid gap-5 grid-cols-1 sm:grid-cols-2">
+            <div v-if="gameMode === 'group'" class="grid grid-cols-1 gap-5 sm:grid-cols-2">
               <label class="text-base font-semibold text-base-content">
                 <span class="label">Max participants</span>
                 <input
@@ -609,7 +602,7 @@ function start() {
                   type="number"
                   min="2"
                   max="100"
-                  class="input input-bordered input-lg w-full rounded-xl focus:outline-none"
+                  class="input input-bordered input-lg w-full focus:outline-none"
                 />
               </label>
               <label class="text-base font-semibold text-base-content">
@@ -619,19 +612,19 @@ function start() {
                   type="number"
                   min="5"
                   max="300"
-                  class="input input-bordered input-lg w-full rounded-xl focus:outline-none"
+                  class="input input-bordered input-lg w-full focus:outline-none"
                   @input="timeTouched = true"
                 />
               </label>
             </div>
             <div
               v-if="gameMode === 'solo'"
-              class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-xl border border-base-300 bg-base-200/50 p-4"
+              class="panel-quiet flex flex-col items-start justify-between gap-4 p-4 sm:flex-row sm:items-center"
             >
               <label class="label cursor-pointer gap-4" for="timer-toggle">
                 <span>
                   <span class="label-text font-semibold text-base-content">Question timer</span>
-                  <span class="block text-sm text-base-content/60">
+                  <span class="text-base-content/60 block text-sm">
                     {{
                       timed
                         ? `${MODE_CONFIG[mode].timerSeconds} seconds per question`
@@ -653,14 +646,14 @@ function start() {
                 allTopics.length > 0 &&
                 Math.floor(itemCount || 0) < allTopics.length
               "
-              class="text-sm text-error"
+              class="text-error text-sm"
             >
               Need at least {{ allTopics.length }} questions for {{ allTopics.length }} topics.
             </p>
             <div class="mt-2 flex flex-col gap-2 sm:flex-row">
               <button
                 type="submit"
-                class="btn btn-soft btn-primary flex-1 text-center whitespace-normal"
+                class="btn btn-primary flex-1 text-center whitespace-normal"
                 :disabled="!canStart"
               >
                 {{ fromGroupReplay ? 'Finalize questions' : `Start ${gameMode} quiz` }}
@@ -668,7 +661,7 @@ function start() {
               <button
                 v-if="fromGroupReplay"
                 type="button"
-                class="btn btn-soft btn-warning flex-1 text-center whitespace-normal"
+                class="btn btn-outline border-base-300 flex-1 text-center whitespace-normal hover:bg-base-200"
                 @click="emit('cancel-edit')"
               >
                 Discard Changes
@@ -676,11 +669,19 @@ function start() {
             </div>
           </form>
 
-          <div class="border-t border-base-300 px-6 py-4 text-center">
-            <button v-if="!fromGroupReplay" class="btn btn-soft btn-sm" @click="backToMode">
+          <div class="border-base-300 border-t px-6 py-4 text-center">
+            <button
+              v-if="!fromGroupReplay"
+              class="btn btn-ghost btn-sm font-mono text-[10px] tracking-[0.16em] uppercase"
+              @click="backToMode"
+            >
               ← Change game mode
             </button>
-            <button v-else class="btn btn-soft btn-sm" @click="emit('cancel-edit')">
+            <button
+              v-else
+              class="btn btn-ghost btn-sm font-mono text-[10px] tracking-[0.16em] uppercase"
+              @click="emit('cancel-edit')"
+            >
               ← Back to lobby
             </button>
           </div>
