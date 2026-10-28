@@ -1,42 +1,64 @@
 @import 'tailwindcss';
+@import './styles/pixel.css';
+
+/* The house theme: the arcade canvas. Every token is a brand colour, so the
+   chrome the app already builds from daisyUI tokens follows automatically.
+   It is declared before the theme list so its `default` fallback rule lands
+   first in the cascade: a named theme picked from the menu must win over the
+   default, and later rules break the tie. */
+@plugin "daisyui/theme" {
+  name: 'arcade';
+  default: true;
+  prefersdark: true;
+  color-scheme: dark;
+
+  --color-base-100: #05060b;
+  --color-base-200: #0a0f1a;
+  --color-base-300: #1b2436;
+  --color-base-content: #e8eef9;
+
+  --color-primary: #22d3ee;
+  --color-primary-content: #04141a;
+  --color-secondary: #a855f7;
+  --color-secondary-content: #f7eeff;
+  --color-accent: #f2559b;
+  --color-accent-content: #1b0310;
+  --color-neutral: #131a29;
+  --color-neutral-content: #c3cede;
+
+  --color-info: #38bdf8;
+  --color-info-content: #04161f;
+  --color-success: #4ade80;
+  --color-success-content: #04170c;
+  --color-warning: #fbbf24;
+  --color-warning-content: #1c1203;
+  --color-error: #fb7185;
+  --color-error-content: #1f0509;
+
+  /* crisp edges instead of daisyUI's soft chrome: flat surfaces, hard borders */
+  --radius-selector: 0.25rem;
+  --radius-field: 0.5rem;
+  --radius-box: 0.875rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
 @plugin "daisyui" {
   themes:
-    light --default,
-    dark,
-    cupcake,
-    bumblebee,
-    emerald,
-    corporate,
-    synthwave,
-    retro,
-    cyberpunk,
-    valentine,
-    halloween,
-    garden,
-    forest,
-    aqua,
-    lofi,
-    pastel,
-    fantasy,
-    wireframe,
-    black,
-    luxury,
-    dracula,
-    cmyk,
-    autumn,
-    business,
-    acid,
-    lemonade,
-    night,
-    coffee,
-    winter,
-    dim,
-    nord,
-    sunset,
-    caramellatte,
-    abyss,
+    light, dark, cupcake, bumblebee, emerald, corporate, synthwave, retro, cyberpunk, valentine,
+    halloween, garden, forest, aqua, lofi, pastel, fantasy, wireframe, black, luxury, dracula, cmyk,
+    autumn, business, acid, lemonade, night, coffee, winter, dim, nord, sunset, caramellatte, abyss,
     silk;
   logs: false;
+}
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+  --font-pixel: 'Silkscreen', 'Press Start 2P', ui-monospace, monospace;
 }
 
 /* keep a single border on focused fields (daisyUI adds a focus outline) */
@@ -55,4 +77,36 @@
 }
 .scrollbar-hidden::-webkit-scrollbar {
   display: none;
+}
+
+/* One content column for the whole app, so the header, the hero copy and the
+   page body share the same left and right edges. The hero's background still
+   goes full bleed — only its text sits in here. */
+.app-container {
+  margin-inline: auto;
+  width: 100%;
+  max-width: 1100px;
+  padding-inline: 1rem;
+}
+
+/* the hero's own column: the reference puts the headline well inside the frame */
+.app-container-narrow {
+  margin-inline: auto;
+  width: 100%;
+  max-width: 820px;
+  padding-inline: 1rem;
+}
+
+@media (min-width: 640px) {
+  .app-container,
+  .app-container-narrow {
+    padding-inline: 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .app-container,
+  .app-container-narrow {
+    padding-inline: 2rem;
+  }
 }

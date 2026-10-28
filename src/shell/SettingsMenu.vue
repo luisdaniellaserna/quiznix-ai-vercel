@@ -3,6 +3,7 @@ import { onUnmounted, ref } from 'vue'
 import { Icon } from '@iconify/vue'
 
 const themes = [
+  'arcade',
   'light',
   'dark',
   'cupcake',
@@ -45,7 +46,7 @@ function getInitialTheme() {
     const saved = localStorage.getItem(THEME_STORAGE_KEY)
     if (saved && themes.includes(saved)) return saved
   } catch {}
-  return 'light'
+  return 'arcade'
 }
 const currentTheme = ref(getInitialTheme())
 // apply theme immediately so the page matches the stored choice before any interaction
@@ -116,7 +117,7 @@ function selectTheme(theme: string) {
 }
 
 function submitReport() {
-  const subject = encodeURIComponent('Quiznix AI — bug report')
+  const subject = encodeURIComponent('MINDaura — bug report')
   const body = encodeURIComponent(reportDetail.value.trim() || 'No details provided.')
   const recipient = reportEmail ? `${reportEmail}?` : ''
   window.location.href = `mailto:${recipient}subject=${subject}&body=${body}`
@@ -152,9 +153,11 @@ onUnmounted(() => {
     </summary>
 
     <div
-      class="dropdown-content card card-sm z-50 w-60 max-w-[calc(100vw-1rem)] bg-base-200 p-1.5 shadow-xl"
+      class="dropdown-content card card-sm border-base-300 bg-base-200 z-50 w-60 max-w-[calc(100vw-1rem)] border p-1.5 shadow-xl"
     >
-      <h2 class="px-3 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wide opacity-70">
+      <h2
+        class="px-3 pt-1.5 pb-1 font-mono text-[10px] font-semibold tracking-[0.22em] uppercase opacity-60"
+      >
         Settings
       </h2>
       <div class="space-y-0.5">
@@ -193,9 +196,11 @@ onUnmounted(() => {
 
   <!-- Change Theme -->
   <dialog ref="themeDialogRef" class="modal">
-    <div class="modal-box scrollbar-hidden overflow-hidden max-w-md">
+    <div
+      class="modal-box border-base-300 bg-base-200 scrollbar-hidden overflow-hidden border max-w-md"
+    >
       <div class="flex items-center justify-between">
-        <h3 class="text-lg font-bold">Change Theme</h3>
+        <h3 class="pixel-title text-lg">Change Theme</h3>
         <button
           class="btn btn-ghost btn-circle min-h-11 min-w-11"
           aria-label="Close"
@@ -245,9 +250,9 @@ onUnmounted(() => {
 
   <!-- Help -->
   <dialog ref="helpDialogRef" class="modal">
-    <div class="modal-box scrollbar-hidden max-w-md">
+    <div class="modal-box scrollbar-hidden border-base-300 bg-base-200 max-w-md border">
       <div class="flex items-center justify-between">
-        <h3 class="text-lg font-bold">Help</h3>
+        <h3 class="pixel-title text-lg">Help</h3>
         <button
           class="btn btn-ghost btn-circle min-h-11 min-w-11"
           aria-label="Close"
@@ -290,6 +295,18 @@ onUnmounted(() => {
             moves, with the faster time breaking a tie.
           </p>
         </section>
+        <section>
+          <h4 class="mb-1 font-semibold">Sudoku</h4>
+          <p class="opacity-90">
+            Fill the grid so every row, column and box holds each digit exactly once. Pick a cell
+            and choose a digit, or drag a digit from the pad onto a cell — while it is held the cell
+            previews it, and it lands when you let go; clues refuse the drop. Arrow keys choose a
+            cell and the number keys fill it, Backspace erases. Notes (N) keeps pencil marks, which
+            are cleared from the peers of a digit you place. There are three hints per puzzle, and
+            the clock only measures you. Every puzzle is generated with exactly one solution, and
+            your fastest time per board and difficulty is kept in this browser.
+          </p>
+        </section>
       </div>
     </div>
     <form method="dialog" class="modal-backdrop">
@@ -299,9 +316,9 @@ onUnmounted(() => {
 
   <!-- Report -->
   <dialog ref="reportDialogRef" class="modal">
-    <div class="modal-box scrollbar-hidden max-w-md">
+    <div class="modal-box scrollbar-hidden border-base-300 bg-base-200 max-w-md border">
       <div class="flex items-center justify-between">
-        <h3 class="text-lg font-bold">Report a problem</h3>
+        <h3 class="pixel-title text-lg">Report a problem</h3>
         <button
           class="btn btn-ghost btn-circle min-h-11 min-w-11"
           aria-label="Close"
@@ -339,8 +356,8 @@ onUnmounted(() => {
 
   <!-- Quit -->
   <dialog ref="quitDialogRef" class="modal">
-    <div class="modal-box">
-      <h3 class="text-lg font-bold">{{ props.quitLabel }}?</h3>
+    <div class="modal-box border-base-300 bg-base-200 border">
+      <h3 class="pixel-title text-lg">{{ props.quitLabel }}?</h3>
       <p class="py-4">Your progress will be lost. Are you sure you want to quit?</p>
       <div class="modal-action">
         <button class="btn btn-ghost" @click="quitDialogRef?.close()">Cancel</button>

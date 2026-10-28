@@ -27,7 +27,11 @@ const store = useGroupStore()
           : 'Reconnecting… your seat is held.'
       }}
     </span>
-    <button v-if="store.connection === 'failed'" class="btn btn-soft btn-sm" @click="store.retryNow()">
+    <button
+      v-if="store.connection === 'failed'"
+      class="btn btn-ghost btn-sm"
+      @click="store.retryNow()"
+    >
       Retry now
     </button>
   </div>

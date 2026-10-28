@@ -22,20 +22,22 @@ import {
   topDisk,
   type Board,
   type Move,
-} from '../../shared/hanoiRules.mjs'
-import { useStopwatch } from '../composables/useStopwatch'
-import { isDragGesture, pegAtPoint, type PegRect } from '../games/hanoi/drag'
-import { formatDuration } from '../games/hanoi/format'
-import { diskLiftShadow, diskShadow, diskSurface, diskWidthPercent } from '../games/hanoi/visuals'
+} from '../../../shared/hanoiRules.mjs'
+import { useStopwatch } from '../../composables/useStopwatch'
+import { isDragGesture, pegAtPoint, type PegRect } from './drag'
+import { formatDuration } from '../shared/format'
+import { diskLiftShadow, diskShadow, diskSurface, diskWidthPercent } from './visuals'
 
 const props = defineProps<{ disks: number }>()
 
 const emit = defineEmits<{
-  solved: [result: { moves: number; ms: number; hintsUsed: number }]
+  solved: [result: { moves: number; ms: number; hintsUsed: number; moveLog: Move[] }]
 }>()
 
 const board = ref<Board>(createBoard(props.disks))
 const moves = ref(0)
+/** Every committed move, in order — the race server replays this to validate. */
+const moveLog = ref<Move[]>([])
 const hintsUsed = ref(0)
 const hint = ref<Move | null>(null)
 const shakePeg = ref<number | null>(null)
@@ -207,6 +209,7 @@ function commit(move: Move, { narrate = false }: { narrate?: boolean } = {}) {
   const disk = topDisk(board.value, move.from)
   board.value = applyMove(board.value, move.from, move.to)
   moves.value += 1
+  moveLog.value.push({ from: move.from, to: move.to })
   hint.value = null
   held.value = null
   hoverPeg.value = null
@@ -221,7 +224,12 @@ function commit(move: Move, { narrate = false }: { narrate?: boolean } = {}) {
     : ''
   if (isSolved(board.value, props.disks)) {
     solved.value = true
-    emit('solved', { moves: moves.value, ms: stop(), hintsUsed: hintsUsed.value })
+    emit('solved', {
+      moves: moves.value,
+      ms: stop(),
+      hintsUsed: hintsUsed.value,
+      moveLog: moveLog.value,
+    })
   }
 }
 
@@ -473,6 +481,7 @@ function restart() {
   held.value = null
   cursorPeg.value = 0
   moves.value = 0
+  moveLog.value = []
   hintsUsed.value = 0
   hint.value = null
   error.value = ''
@@ -515,21 +524,21 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="mx-auto w-full max-w-3xl space-y-4 p-4 sm:p-0 lg:max-w-5xl">
-    <div class="stats stats-vertical w-full bg-base-200 shadow sm:stats-horizontal">
+  <div class="app-container w-full max-w-3xl space-y-4 py-8 sm:py-10 lg:max-w-5xl">
+    <div class="stats stats-vertical border-base-300 w-full border sm:stats-horizontal">
       <div class="stat">
-        <div class="stat-title">Moves</div>
-        <div class="stat-value text-3xl text-primary tabular-nums">{{ moves }}</div>
+        <div class="stat-title font-mono text-[10px] tracking-[0.2em] uppercase">Moves</div>
+        <div class="stat-value pixel-number text-primary text-2xl">{{ moves }}</div>
         <div class="stat-desc">{{ optimal }} is perfect</div>
       </div>
       <div class="stat">
-        <div class="stat-title">Time</div>
-        <div class="stat-value text-3xl tabular-nums">{{ formatDuration(elapsedMs) }}</div>
+        <div class="stat-title font-mono text-[10px] tracking-[0.2em] uppercase">Time</div>
+        <div class="stat-value pixel-number text-2xl">{{ formatDuration(elapsedMs) }}</div>
         <div class="stat-desc">{{ disks }} disks</div>
       </div>
       <div class="stat">
-        <div class="stat-title">Still needed</div>
-        <div class="stat-value text-3xl tabular-nums">{{ remaining }}</div>
+        <div class="stat-title font-mono text-[10px] tracking-[0.2em] uppercase">Still needed</div>
+        <div class="stat-value pixel-number text-2xl">{{ remaining }}</div>
         <div class="stat-desc">moves for a perfect finish</div>
       </div>
     </div>
@@ -539,7 +548,7 @@ onUnmounted(() => {
       role="application"
       tabindex="0"
       aria-label="Tower of Hanoi board. Use the left and right arrow keys to choose a peg, then Space to pick up or drop the top disk."
-      class="relative grid grid-cols-3 gap-2 rounded-2xl bg-base-100 p-2 shadow outline-none focus-visible:ring-2 focus-visible:ring-primary sm:gap-4 sm:p-4"
+      class="border-base-300 bg-base-100 relative grid grid-cols-3 gap-2 rounded-[var(--radius-box)] border p-2 outline-none focus-visible:ring-2 focus-visible:ring-primary sm:gap-4 sm:p-4"
       @keydown="onBoardKeydown"
       @focus="boardFocused = true"
       @blur="boardFocused = false"
@@ -621,16 +630,16 @@ onUnmounted(() => {
 
     <div class="flex flex-wrap items-center gap-2">
       <button
-        class="btn btn-soft btn-warning"
+        class="btn btn-outline border-warning/45 text-warning hover:bg-warning/10 hover:border-warning"
         :disabled="hintsLeft === 0"
         :title="hintsLeft === 0 ? 'No hints left for this puzzle' : `${hintsLeft} left`"
         @click="showHint"
       >
-        <Icon icon="lucide:lightbulb" class="h-4 w-4" />
+        <Icon icon="lucide:lightbulb" class="h-4 w-4" aria-hidden="true" />
         {{ hintsLeft === 0 ? 'No hints left' : `Hint (${hintsLeft})` }}
       </button>
       <button class="btn btn-ghost" @click="restart">
-        <Icon icon="lucide:rotate-ccw" class="h-4 w-4" />
+        <Icon icon="lucide:rotate-ccw" class="h-4 w-4" aria-hidden="true" />
         Restart
       </button>
     </div>
@@ -640,8 +649,8 @@ onUnmounted(() => {
     </p>
 
     <!-- persistent controls reference, below the board so it never competes -->
-    <section class="rounded-xl bg-base-200/50 p-4">
-      <h2 class="text-sm font-semibold">Controls</h2>
+    <section class="panel-quiet p-4">
+      <h2 class="eyebrow">Controls</h2>
       <dl class="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
         <div class="flex items-center gap-3">
           <dt class="flex shrink-0 gap-1">
@@ -705,23 +714,23 @@ onUnmounted(() => {
 
 <style scoped>
 /* Turned wooden dowel: fixed browns, shaded across the width so it reads as a
-   cylinder. Deliberately not a theme token — wood is wood in every theme. */
+   cylinder. Deepened for the dark board so the neon disks stay the subject. */
 .hanoi-rod {
   background-image: linear-gradient(
     90deg,
-    #6b3f1d 0%,
-    #a9713a 35%,
-    #c9955a 52%,
-    #976230 75%,
-    #6b3f1d 100%
+    #3a2515 0%,
+    #7a5330 35%,
+    #96703f 52%,
+    #63421f 75%,
+    #3a2515 100%
   );
-  box-shadow: 0 1px 4px rgb(0 0 0 / 0.25);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.45);
 }
 
 /* The plinth is lit from above rather than across, so it reads as a flat base. */
 .hanoi-base {
-  background-image: linear-gradient(180deg, #b07a45 0%, #8a5527 45%, #5f3818 100%);
-  box-shadow: 0 2px 6px rgb(0 0 0 / 0.3);
+  background-image: linear-gradient(180deg, #6b4a2a 0%, #4a3018 45%, #2c1b0d 100%);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.5);
 }
 
 /* Picking a disk up grows it slightly. `scale` is its own property, so the

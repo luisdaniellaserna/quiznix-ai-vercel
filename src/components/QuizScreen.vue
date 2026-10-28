@@ -98,12 +98,16 @@ onUnmounted(clearTimer)
 </script>
 
 <template>
-  <div class="card w-full max-w-2xl bg-base-200 shadow-xl mx-auto mt-6">
+  <div class="panel mx-auto my-8 w-[calc(100%-2rem)] max-w-2xl">
     <div class="card-body">
       <div class="flex items-center justify-between">
-        <h2 class="card-title">Question {{ currentQuestion + 1 }}</h2>
-        <span v-if="timed" class="badge badge-primary badge-lg font-mono">{{ remaining }}s</span>
-        <span v-else class="badge badge-soft badge-lg font-mono">
+        <h2 class="pixel-title text-lg">Question {{ currentQuestion + 1 }}</h2>
+        <span
+          v-if="timed"
+          class="badge pixel-number border-primary/35 bg-primary/10 text-primary badge-lg"
+          >{{ remaining }}s</span
+        >
+        <span v-else class="badge badge-soft pixel-number badge-lg">
           {{ currentQuestion + 1 }}/{{ props.questions.length }}
         </span>
       </div>
@@ -123,14 +127,16 @@ onUnmounted(clearTimer)
         ></progress>
       </template>
 
-      <h3 class="break-words text-base font-semibold sm:text-lg mt-2">{{ questions[currentQuestion].question }}</h3>
+      <h3 class="break-words text-base font-semibold sm:text-lg mt-2">
+        {{ questions[currentQuestion].question }}
+      </h3>
 
       <div class="grid gap-2">
         <button
           v-for="option in shuffleOptions"
           :key="option"
           type="button"
-          class="btn btn-soft h-auto min-h-12 w-full justify-start whitespace-normal break-words py-3 text-left"
+          class="btn btn-outline border-base-300 h-auto min-h-12 w-full justify-start whitespace-normal break-words py-3 text-left font-normal hover:border-primary hover:bg-base-200"
           :class="{ 'btn-primary btn-active': option === selectedOption }"
           @click="selectedOption = option"
         >
@@ -138,11 +144,11 @@ onUnmounted(clearTimer)
         </button>
       </div>
 
-      <div class="card-actions flex flex-row justify-end mt-4 gap-2">
-        <button class="btn btn-soft" @click="goBack" :disabled="!canGoBack">Back</button>
+      <div class="card-actions mt-4 flex flex-row justify-end gap-2">
+        <button class="btn btn-ghost" @click="goBack" :disabled="!canGoBack">Back</button>
         <button
           v-if="currentQuestion === props.questions.length - 1"
-          class="btn btn-soft btn-primary"
+          class="btn btn-primary"
           @click="askSubmit"
           :disabled="!timed && selectedOption === null"
         >
@@ -150,7 +156,7 @@ onUnmounted(clearTimer)
         </button>
         <button
           v-else
-          class="btn btn-soft btn-primary"
+          class="btn btn-primary"
           @click="submitAnswer"
           :disabled="!timed && selectedOption === null"
         >
@@ -160,15 +166,14 @@ onUnmounted(clearTimer)
     </div>
 
     <dialog ref="submitDialog" class="modal">
-      <div class="modal-box">
-        <h3 class="text-lg font-bold">Submit quiz?</h3>
+      <div class="modal-box border-base-300 bg-base-200 border">
+        <h3 class="pixel-title text-lg">Submit quiz?</h3>
         <p class="py-4">Are you sure to submit this quiz?</p>
         <div class="modal-action">
-          <button class="btn btn-soft" @click="submitDialog?.close()">Cancel</button>
-          <button class="btn btn-soft btn-primary" @click="confirmSubmit">Yes</button>
+          <button class="btn btn-ghost" @click="submitDialog?.close()">Cancel</button>
+          <button class="btn btn-primary" @click="confirmSubmit">Yes</button>
         </div>
       </div>
     </dialog>
-
   </div>
 </template>

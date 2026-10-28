@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A Mind Gym dashboard at `/` that lists the games as cards, replacing the quiz
+  start screen. Games are declared once in `src/games/registry.ts`, so adding one
+  is a folder plus a manifest entry.
+- Client-side routing with lazy game chunks. The dashboard's first paint dropped
+  from ~105 kB to ~56 kB gzip, with the quiz (and its AI client) loading only when
+  its route is opened.
+- `/join/ABC123` as a shareable room link, alongside the older `?room=ABC123`
+  form which now redirects to the quiz.
+- A second game: the Tower of Hanoi, reached at `/hanoi` and playable solo.
 - A confetti burst now rewards finishing a solo quiz. It is scaled up for a
   perfect score and withheld below half marks, so a poor result is not
   celebrated.
@@ -24,9 +33,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   race.
 - Client test suite (`npm run test`, vitest) covering the rules, the hint solver,
   personal-best tie-breaks, and clock formatting.
+- Tower of Hanoi **race mode**: host a race from `/hanoi`, friends join by code
+  or a `?room=CODE` link, and everyone solves the same puzzle at once. The
+  creator races too — they enter a name, take a seat, and share the room code —
+  holding host authority and a racer seat on one connection. First to finish
+  wins, with fewest moves then fewest hints breaking ties; no time limit. The
+  room server replays each submitted move log (`server/hanoiRace.mjs`), so a
+  finish only counts when the moves are legal and the board truly ends solved.
+  Only finishes are broadcast — no board state is streamed.
+- The room server is game-aware: quiz rooms and race rooms share one WebSocket
+  transport and the same room lifecycle (codes, roster, ready gate, grace,
+  rejoin), with a `game` dimension and a race state machine. The cross-tab "one
+  room per browser" guard is now per game, so a quiz room and a race can live in
+  separate tabs at once.
+- A third game: Sudoku at `/sudoku`, playable solo on a 4×4 beginner board or a
+  9×9 classic one (easy/medium/hard). Puzzles are generated on the spot and only
+  kept when exactly one solution remains, so every board is solvable by logic.
+- Sudoku assists: pencil marks in a 3×3 grid per cell that prune themselves
+  around a placed digit, conflict highlighting, and three hints per puzzle.
+- Sudoku digits can be dragged from the pad onto a cell, with the target cell
+  previewing the value until the pointer is released; tapping the pad still fills
+  the selected cell, so both inputs work at the same time.
+- Sudoku bests per board and difficulty (fastest time, fewer hints breaks a tie)
+  in `localStorage`, plus the last board choice remembered between visits.
+- Vitest coverage for the Sudoku rules, puzzle generator (determinism, clue
+  counts, unique solutions) and bests.
 
 ### Changed
 
+- The app is branded **MINDaura**, with the supplied lockup in the header and the
+  supplied icon as the favicon and touch icon. The quiz keeps the Quiznix AI name
+  on its own card and screen. `localStorage` keys are unchanged (`quiznix-*`), so
+  themes, setups and records carry over.
+- A new default theme, `arcade`: a near-black canvas with cyan/violet/pink accents,
+  flat hard-edged surfaces, and a Silkscreen display face over Inter body copy. All
+  36 daisyUI presets remain in the switcher, and the brand chrome adapts to them:
+  the supplied logo is drawn for a light surface, so its plate is keyed out of the
+  asset and, on dark canvases, its lightness is inverted with the hue held; light
+  themes show the original inks. The choice follows the canvas colour, not a
+  hard-coded theme list.
+- `App.vue` is now a thin shell (header + router view + the cross-tab room guard).
+  The quiz's flow, and the Tower of Hanoi's, each own their phases in
+  `src/games/<game>/`, so the shell no longer grows with every game.
+- The podium nav no longer lists individual games: it links the landing sections
+  only (`Games`, `How it works`), so the header does not change as games are added.
+- `formatDuration` and `useStopwatch` moved out of the Hanoi folder to
+  `src/games/shared/` and `src/composables/`, so both solo puzzles share one copy.
+- Group rooms use the single shell header: the host/player role shows as a badge
+  beside the brand, and "Exit quiz" now appears in the shared settings menu
+  instead of a second per-screen header.
 - The Tower of Hanoi clock now starts on the player's first pickup or move
   instead of the moment the board appears, so time spent reading the screen or
   finding the controls is not counted against their solve.
